@@ -1,0 +1,10 @@
+{
+  "name": "opta-x-edu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check app.js && node --check data.js && node --check js/auth.js && node --check firebase-config.js",
+    "serve": "python3 -m http.server 4173"
+  }
+}
