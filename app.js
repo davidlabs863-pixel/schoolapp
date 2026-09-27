@@ -1,17 +1,60 @@
-import { allGrades, grades, subjects, lessons, slideDeck, stats, getAllLessons, getGrade, getLesson, getSubject } from './data.js';
+import { academyRoleData, allGrades, grades, subjects, lessons, slideDeck, stats, getAllLessons, getGrade, getLesson, getSubject } from './data.js?v=20260927-lwf';
 import { authConfig, getProfile, getSession, getSharedLessons, initializeAuth, localProfile, saveOnboarding, saveSharedLesson, signInWithGoogle, signOut, uploadLessonVideo } from './js/auth.js?v=20260921-auth4';
 
 const page = document.body.dataset.page;
 const app = document.querySelector('#app');
 const params = new URLSearchParams(window.location.search);
+const protectedPages = new Set(['dashboard', 'grades', 'subjects', 'lesson', 'teacher', 'slides']);
 let currentUser = null;
 let currentProfile = null;
 
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
 const subjectName = (id) => getSubject(id).name;
 const icon = (symbol) => `<span class="side-icon">${symbol}</span>`;
-const userName = () => currentProfile?.full_name || currentUser?.displayName || 'Learner';
+const getGoogleDisplayName = () => currentUser?.user_metadata?.full_name || currentUser?.user_metadata?.name || currentUser?.user_metadata?.given_name || currentUser?.displayName || currentUser?.full_name || currentProfile?.full_name || '';
+const getAccountAvatar = () => currentUser?.photoURL || currentUser?.user_metadata?.avatar_url || currentUser?.user_metadata?.picture || currentUser?.avatar_url || currentProfile?.avatar_url || '';
+const userName = () => getGoogleDisplayName() || 'Learner';
 const userInitials = () => userName().split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+
+function getDurationMinutes(value = '0 min') {
+  const match = String(value).match(/(\d+)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+function getStudentDashboardData() {
+  const gradeId = Number(currentProfile?.grade_id || currentUser?.grade_id || 7);
+  const catalog = getLessonCatalog();
+  const relevantLessons = catalog.filter((lesson) => (!lesson.grade || lesson.grade === gradeId) || lesson.className === 'General Knowledge');
+  const subjectMap = ['math', 'english', 'science', 'history', 'computer', 'geography'];
+  const progress = subjectMap.map((subjectId) => {
+    const subjectLessons = relevantLessons.filter((lesson) => lesson.subject === subjectId);
+    const value = subjectLessons.length ? Math.min(96, 35 + subjectLessons.length * 12) : 18 + Math.random() * 18;
+    return { label: getSubject(subjectId).name, value: Math.round(value), tone: subjectId === 'math' ? 'coral' : subjectId === 'english' ? 'mint' : subjectId === 'science' ? 'amber' : 'coral' };
+  });
+
+  const recent = relevantLessons.slice(0, 3).map((lesson) => ({
+    title: lesson.title,
+    detail: `${lesson.topic} · ${lesson.difficulty}`,
+    badge: lesson.videoType === 'upload' ? '▣' : '▶'
+  }));
+
+  const totalMinutes = relevantLessons.reduce((sum, lesson) => sum + getDurationMinutes(lesson.duration), 0);
+  const completed = Math.max(6, relevantLessons.length + 10);
+  const savedCount = getLessonHistory().length + Math.max(0, relevantLessons.length - 2);
+
+  return {
+    dateLabel: 'Today',
+    name: userName(),
+    metrics: [
+      { label: 'Learning streak', value: `${Math.min(12, 3 + Math.max(0, Math.floor(relevantLessons.length / 2)))} days`, delta: '+1 from last week' },
+      { label: 'Lessons completed', value: String(completed), delta: `+${Math.max(3, Math.floor(relevantLessons.length / 2))} this month` },
+      { label: 'Watch time', value: `${(totalMinutes / 60).toFixed(1)}h`, delta: '+12% this month' },
+      { label: 'Saved for later', value: String(savedCount), delta: `${Math.max(1, Math.floor(savedCount / 3))} new this week` }
+    ],
+    progress,
+    recent
+  };
+}
 
 function authLogo() { return 'learn%20with%20fola.jpeg'; }
 
@@ -54,12 +97,32 @@ function roleOnboarding(role) {
 }
 
 function renderAuthFlow() {
-  if (!currentUser) app.innerHTML = authScreen(authConfig.configured ? '' : 'Supabase is not configured yet. Add your project URL and anon key to enable Google sign-in.');
-  else if (!currentProfile?.requested_role) app.innerHTML = roleSelection();
-  else if (currentProfile.requested_role === 'student' && !currentProfile.grade_id) app.innerHTML = roleOnboarding('student');
-  else render();
-  applyBranding();
-  bindAuthEvents();
+  if (!currentUser) {
+    if (protectedPages.has(page)) {
+      window.location.href = 'index.html';
+      return;
+    }
+    app.innerHTML = authScreen(authConfig.configured ? '' : 'Supabase is not configured yet. Add your project URL and anon key to enable Google sign-in.');
+    applyBranding();
+    bindAuthEvents();
+    return;
+  }
+
+  if (!currentProfile?.requested_role) {
+    app.innerHTML = roleSelection();
+    applyBranding();
+    bindAuthEvents();
+    return;
+  }
+
+  if (currentProfile.requested_role === 'student' && !currentProfile.grade_id) {
+    app.innerHTML = roleOnboarding('student');
+    applyBranding();
+    bindAuthEvents();
+    return;
+  }
+
+  render();
 }
 
 function bindAuthEvents() {
@@ -84,6 +147,10 @@ function bindAuthEvents() {
   document.querySelector('#auth-sign-out')?.addEventListener('click', signOut);
   document.querySelectorAll('[data-role]').forEach((card) => card.addEventListener('click', async () => {
     const role = card.dataset.role;
+    if (currentProfile?.requested_role && currentProfile.requested_role !== role) {
+      showToast('This account is already set to a role. Use a different Google account to switch roles.');
+      return;
+    }
     currentProfile = { ...currentProfile, requested_role: role };
     localStorage.setItem(`opta-profile:${currentProfile.id}`, JSON.stringify(currentProfile));
     if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile));
@@ -114,7 +181,7 @@ function shell(content, title = 'Overview') {
   const isTeacher = page === 'teacher' || page === 'slides';
   return `<div class="app-shell">
     <aside class="sidebar" id="sidebar">
-      <a class="brand" href="index.html"><span class="brand-mark">X</span>OPTA X EDU</a>
+      <a class="brand" href="index.html"><span class="brand-mark">X</span>Learn With Fola</a>
       <div class="side-label">Learn</div>
       ${navLink('dashboard.html', 'My dashboard', '⌂', page === 'dashboard')}
       ${navLink('grades.html', 'Browse grades', '▦', page === 'grades' || page === 'subjects')}
@@ -128,7 +195,7 @@ function shell(content, title = 'Overview') {
       <div class="sidebar-footer"><strong>Learning streak</strong>3 days in a row. Keep the momentum going.</div>
     </aside>
     <main class="app-main">
-      <header class="app-topbar"><div class="breadcrumb"><span>OPTA X EDU</span> <b>/</b> <strong>${title}</strong></div><div class="search-box">⌕ <input id="global-search" placeholder="Search lessons, topics..." aria-label="Search lessons" /></div><div class="top-actions"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button><div class="avatar">${currentProfile?.avatar_url ? `<img src="${escapeHtml(currentProfile.avatar_url)}" alt="${escapeHtml(userName())}" />` : userInitials()}</div></div></header>
+      <header class="app-topbar"><div class="breadcrumb"><span>Learn With Fola</span> <b>/</b> <strong>${title}</strong></div><div class="search-box">⌕ <input id="global-search" placeholder="Search lessons, topics..." aria-label="Search lessons" /></div><div class="top-actions"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button><div class="avatar">${currentProfile?.avatar_url ? `<img src="${escapeHtml(currentProfile.avatar_url)}" alt="${escapeHtml(userName())}" />` : userInitials()}</div></div></header>
       ${content}
     </main>
   </div><div class="toast" id="toast"></div>`;
@@ -255,14 +322,40 @@ function bindLessonHistoryEvents() {
 
 function home() {
   const featured = getLessonCatalog().filter((lesson) => lesson.featured);
-  return `<header class="site-header"><a class="brand" href="index.html"><span class="brand-mark">X</span>OPTA X EDU</a><nav class="top-nav"><a class="active" href="index.html">Home</a><a href="grades.html">Explore</a><a href="dashboard.html">My learning</a><a href="teacher.html">For teachers</a></nav><div class="top-actions"><a class="btn btn-ghost btn-small" href="teacher.html">Teacher portal</a><div class="avatar">OX</div><button class="icon-button mobile-menu" id="mobile-menu">☰</button></div></header>
-  <main><section class="hero"><div class="hero-inner"><div class="reveal"><div class="eyebrow">A smarter way to learn</div><h1>Learn. Watch.<br>Understand. Grow.</h1><p class="hero-copy">Explore educational videos, lesson notes and interactive learning materials from Grade 1 to Grade 12.</p><div class="hero-actions"><a class="btn btn-primary" href="grades.html">Start learning <span>→</span></a><a class="btn btn-ghost" href="grades.html">Explore grades</a></div></div><div class="hero-visual"><div class="floating-label label-one">12 grades · one place</div><img class="hero-logo" src="ChatGPT%20Image%20Sep%2021,%202026,%2003_34_29%20PM.png" alt="OPTA X EDU logo"><div class="floating-label label-two">+ 18 min of progress</div></div></div></section>
+  return `<header class="site-header"><a class="brand" href="index.html"><span class="brand-mark">X</span>Learn With Fola</a><nav class="top-nav"><a class="active" href="index.html">Home</a><a href="grades.html">Explore</a><a href="dashboard.html">My learning</a><a href="teacher.html">For teachers</a></nav><div class="top-actions"><a class="btn btn-ghost btn-small" href="teacher.html">Teacher portal</a><div class="avatar">LW</div><button class="icon-button mobile-menu" id="mobile-menu">☰</button></div></header>
+  <main><section class="hero"><div class="hero-inner"><div class="reveal"><div class="eyebrow">A smarter way to learn</div><h1>Learn. Watch.<br>Understand. Grow.</h1><p class="hero-copy">Explore educational videos, lesson notes and interactive learning materials from Grade 1 to Grade 12.</p><div class="hero-actions"><a class="btn btn-primary" href="grades.html">Start learning <span>→</span></a><a class="btn btn-ghost" href="grades.html">Explore grades</a></div></div><div class="hero-visual"><div class="floating-label label-one">12 grades · one place</div><img class="hero-logo" src="ChatGPT%20Image%20Sep%2021,%202026,%2003_34_29%20PM.png" alt="Learn With Fola logo"><div class="floating-label label-two">+ 18 min of progress</div></div></div></section>
   <section class="section"><div class="section-head"><div><div class="eyebrow">Picked for you</div><h2>Popular lessons</h2><p>Short, clear lessons for curious minds.</p></div><a class="text-link" href="grades.html">View all lessons →</a></div><div class="content-grid lesson-grid">${featured.map(lessonCard).join('')}</div></section>
   <section class="section tinted"><div class="section-head"><div><div class="eyebrow">Find your level</div><h2>Browse by grade</h2><p>Every learner has a next step.</p></div><a class="text-link" href="grades.html">See all 12 grades →</a></div><div class="content-grid grade-strip">${grades.map(gradeCard).join('')}</div></section>
-  <section class="section"><div class="section-head"><div><div class="eyebrow">Explore your curiosity</div><h2>Browse by subject</h2></div></div><div class="content-grid subject-grid">${subjects.slice(0, 6).map((subject) => `<a class="subject-card reveal" href="subjects.html?subject=${subject.id}"><div class="subject-icon color-${subject.color}">${subject.icon}</div><h3>${subject.name}</h3><p>${subject.description}</p></a>`).join('')}</div></section></main><footer class="footer"><span><strong>OPTA X EDU</strong> · Learning with momentum.</span><span>Built for students, teachers and what comes next.</span></footer>`;
+  <section class="section"><div class="section-head"><div><div class="eyebrow">Explore your curiosity</div><h2>Browse by subject</h2></div></div><div class="content-grid subject-grid">${subjects.slice(0, 6).map((subject) => `<a class="subject-card reveal" href="subjects.html?subject=${subject.id}"><div class="subject-icon color-${subject.color}">${subject.icon}</div><h3>${subject.name}</h3><p>${subject.description}</p></a>`).join('')}</div></section></main><footer class="footer"><span><strong>Learn With Fola</strong> · Educate · Inspire · Empower.</span><span>Built for students, teachers and what comes next.</span></footer>`;
 }
 
-function dashboard() { return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">Tuesday, September 21</div><h1>Welcome back, Alex.</h1><p>Pick up where you left off and keep your curiosity moving.</p></div><a class="btn btn-primary" href="grades.html">Find a lesson →</a></div><div class="metrics"><div class="metric"><span class="metric-label">Learning streak</span><div class="stat-number">3 days</div><span class="delta">+1 from last week</span></div><div class="metric"><span class="metric-label">Lessons completed</span><div class="stat-number">24</div><span class="delta">+6 this month</span></div><div class="metric"><span class="metric-label">Watch time</span><div class="stat-number">8.4h</div><span class="delta">+18% this month</span></div><div class="metric"><span class="metric-label">Saved for later</span><div class="stat-number">12</div><span class="delta">3 new this week</span></div></div><div class="dashboard-grid"><section class="panel" id="progress"><div class="panel-heading"><h2>Your progress</h2><span>Across your subjects</span></div><div class="progress-row"><div class="progress-info">Mathematics <span>80%</span></div><div class="progress-track"><div class="progress-fill" style="width:80%"></div></div></div><div class="progress-row"><div class="progress-info">English Language <span>60%</span></div><div class="progress-track"><div class="progress-fill mint" style="width:60%"></div></div></div><div class="progress-row"><div class="progress-info">Basic Science <span>70%</span></div><div class="progress-track"><div class="progress-fill amber" style="width:70%"></div></div></div><div class="progress-row"><div class="progress-info">History <span>42%</span></div><div class="progress-track"><div class="progress-fill" style="width:42%"></div></div></div></section><section class="panel"><div class="panel-heading"><h2>Recently watched</h2><span>See all →</span></div><div class="activity"><div class="activity-dot">▶</div><div><p>Fractions made visual</p><small>Watched 12 minutes ago</small></div></div><div class="activity"><div class="activity-dot">✦</div><div><p>How plants make food</p><small>Watched yesterday</small></div></div><div class="activity"><div class="activity-dot">Aa</div><div><p>Build stronger sentences</p><small>Watched 2 days ago</small></div></div></section></div><section class="section" style="padding:38px 0 0"><div class="section-head"><div><div class="eyebrow">Keep exploring</div><h2>Recommended lessons</h2></div><a class="text-link" href="grades.html">Browse library →</a></div><div class="content-grid lesson-grid">${lessons.slice(0, 3).map(lessonCard).join('')}</div></section></div>`, 'My dashboard'); }
+function dashboard() {
+  const studentData = getStudentDashboardData();
+  const progressRows = studentData.progress.map((item) => `
+    <div class="progress-row">
+      <div class="progress-info">${item.label} <span>${item.value}%</span></div>
+      <div class="progress-track"><div class="progress-fill ${item.tone === 'mint' ? 'mint' : item.tone === 'amber' ? 'amber' : ''}" style="width:${item.value}%"></div></div>
+    </div>
+  `).join('');
+  const recentRows = studentData.recent.map((item) => `
+    <div class="activity">
+      <div class="activity-dot">${item.badge}</div>
+      <div>
+        <p>${item.title}</p>
+        <small>${item.detail}</small>
+      </div>
+    </div>
+  `).join('');
+  const metricCards = studentData.metrics.map((item) => `
+    <div class="metric">
+      <span class="metric-label">${item.label}</span>
+      <div class="stat-number">${item.value}</div>
+      <span class="delta">${item.delta}</span>
+    </div>
+  `).join('');
+
+  return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">${studentData.dateLabel}</div><h1>Welcome back, ${escapeHtml(studentData.name)}.</h1><p>Pick up where you left off and keep your curiosity moving.</p></div><a class="btn btn-primary" href="grades.html">Find a lesson →</a></div><div class="metrics">${metricCards}</div><div class="dashboard-grid"><section class="panel" id="progress"><div class="panel-heading"><h2>Your progress</h2><span>Across your subjects</span></div>${progressRows}</section><section class="panel"><div class="panel-heading"><h2>Recently watched</h2><span>See all →</span></div>${recentRows}</section></div></div>`, 'Dashboard');
+}
 
 function gradesPage() { return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">Your learning map</div><h1>Choose a grade.</h1><p>Start with where you are, then go wherever your questions lead.</p></div><div class="filter-bar"><input class="field" id="grade-search" placeholder="Search a grade..." /></div></div><div class="grade-grid" id="grade-grid">${allGrades.map(gradeCard).join('')}</div></div>`, 'Browse grades'); }
 
@@ -276,25 +369,245 @@ function subjectsPage() {
 
 function lessonPage() { const lesson = getLesson(params.get('id')); return shell(`<div class="page"><div class="video-layout"><div><div class="video-frame">${lesson.videoType === 'upload' && lesson.videoUrl ? `<video class="lesson-video" controls preload="metadata" src="${lesson.videoUrl}"></video>` : `<iframe src="https://www.youtube.com/embed/${lesson.videoId}" title="${escapeHtml(lesson.title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`}</div><div class="kicker" style="margin-top:27px">${subjectName(lesson.subject)} · ${lesson.topic}</div><h1 class="lesson-title">${lesson.title}</h1><p class="lesson-subtitle">${lesson.description}</p><div class="lesson-facts"><span class="fact">Grade ${lesson.grade}</span><span class="fact">${lesson.teacher}</span><span class="fact">${lesson.duration}</span><span class="fact">${lesson.difficulty}</span></div><div class="notes"><h2>Lesson notes</h2><section><h3>Introduction</h3><p>Today we are making ${lesson.topic.toLowerCase()} easier to see, talk about and use. Start with the big idea, then use the examples to test your understanding.</p></section><section><h3>Learning objectives</h3><ul><li>Explain the main idea in your own words.</li><li>Recognize the pattern in a new example.</li><li>Use the method to solve a practice question.</li></ul></section><section><h3>Main explanation</h3><p>Good learning is built in small steps. Watch the video once for the story, then pause and replay the worked example. Write down what changes, what stays the same and why the answer makes sense.</p></section><section><h3>Key points</h3><ul><li>Look for the information the question gives you.</li><li>Choose one clear method and show your thinking.</li><li>Check the result against the original question.</li></ul></section><section><h3>Summary</h3><p>You have the building blocks. Next, try the practice questions and explain one answer to someone else.</p></section></div></div><aside><div class="panel"><div class="panel-heading"><h2>Lesson resources</h2></div><div class="resource-list"><a class="resource" href="slides.html">▤ Lesson slides <span>Open →</span></a><a class="resource" href="#notes">▣ Lesson notes <span>Read below</span></a><a class="resource" href="grades.html">▶ Related videos <span>Browse →</span></a><a class="resource" href="#practice">✎ Practice questions <span>Start →</span></a></div><button class="btn btn-soft" style="width:100%;margin-top:16px" id="save-lesson">♡ Save lesson</button></div></aside></div></div>`, `${subjectName(lesson.subject)} / ${lesson.title}`); }
 
-function teacherPage() { return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">Teacher workspace</div><h1>Make learning clearer.</h1><p>Curate videos, write notes and publish lessons your students can return to.</p></div><button class="btn btn-primary" id="new-lesson">＋ Create lesson</button></div><div class="metrics"><div class="metric"><span class="metric-label">My lessons</span><div class="stat-number">18</div><span class="delta">4 published this month</span></div><div class="metric"><span class="metric-label">Video library</span><div class="stat-number">42</div><span class="delta">8 ready to review</span></div><div class="metric"><span class="metric-label">Drafts</span><div class="stat-number">6</div><span class="delta">Keep shaping them</span></div><div class="metric"><span class="metric-label">Total learners</span><div class="stat-number">286</div><span class="delta">Across your lessons</span></div></div><div class="studio-tabs"><button class="tab active">My lessons</button><button class="tab">Video library</button><button class="tab">Lesson notes</button><button class="tab">Published</button><button class="tab">Drafts</button></div><div class="panel" id="lesson-form" style="display:none;margin-bottom:20px"><div class="panel-heading"><h2>Create a lesson</h2><span>Saved locally until Supabase is connected</span></div><form class="form-grid" id="create-form"><div class="form-group"><label for="grade">Grade</label><select class="select-field" id="grade" required><option value="">Choose grade</option>${allGrades.map((grade) => `<option>${grade.label}</option>`).join('')}</select></div><div class="form-group"><label for="subject">Subject</label><select class="select-field" id="subject" required><option value="">Choose subject</option>${subjects.map((subject) => `<option>${subject.name}</option>`).join('')}</select></div><div class="form-group"><label for="topic">Topic</label><input class="field" id="topic" placeholder="e.g. Linear equations" required></div><div class="form-group"><label for="title">Lesson title</label><input class="field" id="title" placeholder="Give this lesson a clear name" required></div><div class="form-group full"><label for="description">Description</label><textarea id="description" placeholder="What will learners be able to do after this lesson?" required></textarea></div><div class="form-group full"><label for="objectives">Learning objectives</label><textarea id="objectives" placeholder="One objective per line"></textarea></div><div class="form-group"><label for="video">YouTube video URL</label><input class="field" id="video" placeholder="https://youtube.com/watch?v=..." required></div><div class="form-group"><label for="teacher-name">Teacher name</label><input class="field" id="teacher-name" placeholder="Your name" required></div><div class="form-group"><label for="duration">Lesson duration</label><input class="field" id="duration" placeholder="18 min"></div><div class="form-group"><label for="difficulty">Difficulty</label><select class="select-field" id="difficulty"><option>Core</option><option>Stretch</option><option>Foundation</option></select></div><div class="form-actions full"><button type="button" class="btn btn-ghost" data-save="draft">Save draft</button><button class="btn btn-primary" type="submit">Publish lesson</button></div></form></div><div class="panel"><div class="table-row table-header"><span>Lesson</span><span>Subject</span><span>Status</span><span>Updated</span></div>${lessons.slice(0, 5).map((lesson) => `<div class="table-row"><span><strong>${lesson.title}</strong><br><small style="color:var(--muted)">Grade ${lesson.grade} · ${lesson.topic}</small></span><span>${subjectName(lesson.subject)}</span><span><b class="status ${lesson.status === 'draft' ? 'draft' : ''}">${lesson.status}</b></span><span style="color:var(--muted)">Today</span></div>`).join('')}</div></div>`, 'Teacher studio'); }
+function teacherPage() {
+  const teacherData = academyRoleData.teacher || academyRoleData.student;
+  const teacherRosters = [
+    { title: 'Grade 7 Mathematics', time: 'Today · 3:00 PM', students: 18, status: 'Live' },
+    { title: 'Grade 5 English', time: 'Today · 4:30 PM', students: 12, status: 'Scheduled' },
+    { title: 'Grade 9 Science', time: 'Tomorrow · 9:00 AM', students: 21, status: 'Planned' }
+  ];
+  const liveClassRows = teacherRosters.map((classItem) => `
+    <div class="activity">
+      <div class="activity-dot">◎</div>
+      <div>
+        <p>${classItem.title}</p>
+        <small>${classItem.time} · ${classItem.students} students · ${classItem.status}</small>
+      </div>
+    </div>
+  `).join('');
+  const supportRows = (teacherData.support || []).map((student) => `
+    <div class="activity">
+      <div class="activity-dot">${student.name.split(' ')[0][0]}</div>
+      <div>
+        <p>${student.name}</p>
+        <small>${student.subject} · ${student.need}</small>
+      </div>
+    </div>
+  `).join('');
+  const assignmentRows = (teacherData.assignments || []).map((item) => `
+    <div class="activity">
+      <div class="activity-dot">✓</div>
+      <div>
+        <p>${item.title}</p>
+        <small>${item.due} · ${item.status}</small>
+      </div>
+    </div>
+  `).join('');
+  const metricCards = (teacherData.metrics || []).map((item) => `
+    <div class="metric">
+      <span class="metric-label">${item.label}</span>
+      <div class="stat-number">${item.value}</div>
+      <span class="delta">${item.delta}</span>
+    </div>
+  `).join('');
+  const publishedLessons = getLessonCatalog().slice(0, 3).map((lesson) => `
+    <article class="lesson-card reveal">
+      <div class="lesson-thumb">
+        <img src="${lesson.thumbnail}" alt="${escapeHtml(lesson.title)} thumbnail" loading="lazy">
+        <span class="lesson-tag">Grade ${lesson.grade} · ${subjectName(lesson.subject)}</span>
+        <span class="play">▶</span>
+      </div>
+      <div class="lesson-body">
+        <div class="lesson-meta"><span>${lesson.topic}</span><span>·</span><span>${lesson.difficulty}</span></div>
+        <h3>${escapeHtml(lesson.title)}</h3>
+        <p>${escapeHtml(lesson.description)}</p>
+        <div class="lesson-bottom"><small>${lesson.duration} · ${lesson.teacher}</small><a class="text-link" href="lesson.html?id=${lesson.id}">Open lesson →</a></div>
+      </div>
+    </article>
+  `).join('');
 
+  return shell(`<div class="page">
+    <div class="page-heading">
+      <div>
+        <div class="kicker">Teacher studio</div>
+        <h1>Lead learning with clarity.</h1>
+        <p>${teacherData.summary}</p>
+      </div>
+      <button class="btn btn-primary" id="new-lesson">＋ Create lesson</button>
+    </div>
+    <div class="metrics">${metricCards}</div>
+    <div class="dashboard-grid">
+      <section class="panel">
+        <div class="panel-heading"><h2>Students needing attention</h2><span>Support next</span></div>
+        ${supportRows}
+      </section>
+      <section class="panel">
+        <div class="panel-heading"><h2>Live classes</h2><span>Classroom now</span></div>
+        ${liveClassRows}
+      </section>
+    </div>
+    <div class="panel" style="margin-top:18px">
+      <div class="panel-heading"><h2>Upcoming classroom work</h2><span>Live plan</span></div>
+      ${assignmentRows}
+    </div>
+    <div class="panel" id="lesson-form" style="display:none;margin-bottom:20px">
+      <div class="panel-heading"><h2>Create a lesson</h2><span>Saved locally for your classroom</span></div>
+      <form class="form-grid" id="create-form">
+        <div class="form-group"><label for="grade">Grade</label><select class="select-field" id="grade" required><option value="">Choose grade</option>${allGrades.map((grade) => `<option value="${grade.label}">${grade.label}</option>`).join('')}</select></div>
+        <div class="form-group"><label for="subject">Subject</label><select class="select-field" id="subject" required><option value="">Choose subject</option>${subjects.map((subject) => `<option value="${subject.name}">${subject.name}</option>`).join('')}</select></div>
+        <div class="form-group"><label for="topic">Topic</label><input class="field" id="topic" placeholder="e.g. Linear equations" required /></div>
+        <div class="form-group"><label for="title">Lesson title</label><input class="field" id="title" placeholder="Give this lesson a clear name" required /></div>
+        <div class="form-group full"><label for="description">Description</label><textarea id="description" placeholder="What will learners be able to do after this lesson?" required></textarea></div>
+        <div class="form-group"><label for="teacher-name">Teacher</label><input class="field" id="teacher-name" value="${escapeHtml(userName())}" /></div>
+        <div class="form-group"><label for="duration">Duration</label><input class="field" id="duration" placeholder="e.g. 18 min" /></div>
+        <div class="form-group"><label for="difficulty">Difficulty</label><select class="select-field" id="difficulty"><option value="Core">Core</option><option value="Stretch">Stretch</option></select></div>
+        <div class="form-group full"><label for="video">Video link</label><input class="field" id="video" placeholder="https://youtu.be/..." /></div>
+        <div class="form-actions" style="grid-column:1 / -1; display:flex; gap:10px; flex-wrap:wrap">
+          <button class="btn btn-primary" type="submit">Publish lesson</button>
+          <button class="btn btn-ghost" type="button" data-save="draft">Save draft</button>
+        </div>
+      </form>
+    </div>
+    <section class="section" style="padding:38px 0 0">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Recently published</div>
+          <h2>Latest lessons in your library</h2>
+        </div>
+        <a class="text-link" href="grades.html">Browse all lessons →</a>
+      </div>
+      <div class="content-grid lesson-grid">${publishedLessons}</div>
+    </section>
+  </div>`, 'Teacher studio');
+}
 function slidesPage() { return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">Lesson slide creator</div><h1>Tell the story, slide by slide.</h1><p>Grade 8 Mathematics · Algebra · 7 slides</p></div><div class="hero-actions"><button class="btn btn-ghost" id="preview-slides">Preview</button><button class="btn btn-primary" id="save-slides">Save presentation</button></div></div><div class="slide-workspace"><aside class="slide-sidebar" id="slide-list">${slideDeck.map((slide, index) => `<div class="slide-thumb ${index === 0 ? 'active' : ''}" data-slide="${index}"><div class="slide-thumb-preview">${slide.title}</div><small>Slide ${index + 1}</small></div>`).join('')}</aside><section><div class="slide-canvas" id="slide-canvas"><div class="eyebrow">Grade 8 · Mathematics</div><h2 id="slide-title">${slideDeck[0].title}</h2><p id="slide-body">${slideDeck[0].body}</p></div><div class="slide-actions"><button class="btn btn-ghost btn-small" id="add-slide">＋ Add slide</button><button class="btn btn-ghost btn-small" id="duplicate-slide">▣ Duplicate</button><button class="btn btn-ghost btn-small" id="delete-slide">Delete</button></div></section><aside class="slide-inspector"><h3 class="inspector-title">Slide tools</h3><div class="stack"><button class="btn btn-ghost btn-small">T Add title</button><button class="btn btn-ghost btn-small">≡ Add text</button><button class="btn btn-ghost btn-small">• Add bullet points</button><button class="btn btn-ghost btn-small">▧ Add image</button><button class="btn btn-ghost btn-small">▶ Add YouTube video</button><button class="btn btn-ghost btn-small">◇ Add shape</button></div><div style="border-top:1px solid var(--line);margin-top:20px;padding-top:17px"><h3 class="inspector-title">Speaker notes</h3><textarea style="width:100%;min-height:120px" placeholder="Add a note for this slide..."></textarea></div></aside></div></div>`, 'Slide creator'); }
 
-function render() { if (page === 'home') app.innerHTML = home(); if (page === 'dashboard') app.innerHTML = dashboard(); if (page === 'grades') app.innerHTML = gradesPage(); if (page === 'subjects') app.innerHTML = params.get('class') === 'general-knowledge' ? generalKnowledgePage() : subjectsPage(); if (page === 'lesson') app.innerHTML = lessonPage(); if (page === 'teacher') app.innerHTML = teacherPage(); if (page === 'slides') app.innerHTML = slidesPage(); applyBranding(); bindEvents(); }
+function parentPage() {
+  const parentData = academyRoleData.parent || academyRoleData.student;
+  const metricCards = (parentData.metrics || []).map((item) => `
+    <div class="metric">
+      <span class="metric-label">${item.label}</span>
+      <div class="stat-number">${item.value}</div>
+      <span class="delta">${item.delta}</span>
+    </div>
+  `).join('');
+  const childRows = (parentData.children || []).map((child) => `
+    <div class="activity">
+      <div class="activity-dot">${child.name.split(' ')[0][0]}</div>
+      <div>
+        <p>${child.name}</p>
+        <small>${child.grade} · ${child.status} · ${child.focus}</small>
+      </div>
+    </div>
+  `).join('');
+  const activityRows = (parentData.activities || []).map((activity) => `
+    <div class="activity">
+      <div class="activity-dot">✓</div>
+      <div>
+        <p>${activity.title}</p>
+        <small>${activity.detail} · ${activity.status}</small>
+      </div>
+    </div>
+  `).join('');
+
+  return shell(`<div class="page">
+    <div class="page-heading">
+      <div>
+        <div class="kicker">Family dashboard</div>
+        <h1>Keep your child moving forward.</h1>
+        <p>${parentData.summary}</p>
+      </div>
+      <a class="btn btn-primary" href="grades.html">Explore lessons →</a>
+    </div>
+    <div class="metrics">${metricCards}</div>
+    <div class="dashboard-grid">
+      <section class="panel">
+        <div class="panel-heading"><h2>Your children</h2><span>Overview</span></div>
+        ${childRows}
+      </section>
+      <section class="panel">
+        <div class="panel-heading"><h2>Latest updates</h2><span>Home support</span></div>
+        ${activityRows}
+      </section>
+    </div>
+  </div>`, 'Family dashboard');
+}
+
+function principalPage() {
+  const adminData = academyRoleData.admin || academyRoleData.student;
+  const metricCards = (adminData.metrics || []).map((item) => `
+    <div class="metric">
+      <span class="metric-label">${item.label}</span>
+      <div class="stat-number">${item.value}</div>
+      <span class="delta">${item.delta}</span>
+    </div>
+  `).join('');
+  const schoolRows = (adminData.school || []).map((item) => `
+    <div class="progress-row">
+      <div class="progress-info">${item.title} <span>${item.value}</span></div>
+      <div class="progress-track"><div class="progress-fill ${item.color === 'mint' ? 'mint' : item.color === 'amber' ? 'amber' : item.color === 'violet' ? 'violet' : ''}" style="width:${item.value}"></div></div>
+    </div>
+  `).join('');
+  const reportRows = (adminData.reports || []).map((report) => `
+    <div class="activity">
+      <div class="activity-dot">◎</div>
+      <div>
+        <p>${report.name}</p>
+        <small>${report.detail} · ${report.status}</small>
+      </div>
+    </div>
+  `).join('');
+
+  return shell(`<div class="page">
+    <div class="page-heading">
+      <div>
+        <div class="kicker">School dashboard</div>
+        <h1>Track academy performance.</h1>
+        <p>${adminData.summary}</p>
+      </div>
+      <button class="btn btn-primary" type="button">Export report</button>
+    </div>
+    <div class="metrics">${metricCards}</div>
+    <div class="dashboard-grid">
+      <section class="panel">
+        <div class="panel-heading"><h2>Subject health</h2><span>School view</span></div>
+        ${schoolRows}
+      </section>
+      <section class="panel">
+        <div class="panel-heading"><h2>Latest school reports</h2><span>Actions</span></div>
+        ${reportRows}
+      </section>
+    </div>
+  </div>`, 'School dashboard');
+}
+
+function render() {
+  const role = (currentProfile?.requested_role || currentUser?.requested_role || 'student').toLowerCase();
+  if (page === 'home') app.innerHTML = home();
+  if (page === 'dashboard') {
+    if (role === 'teacher') app.innerHTML = teacherPage();
+    else if (role === 'parent') app.innerHTML = parentPage();
+    else if (role === 'principal') app.innerHTML = principalPage();
+    else app.innerHTML = dashboard();
+  }
+  if (page === 'grades') app.innerHTML = gradesPage();
+  if (page === 'subjects') app.innerHTML = params.get('class') === 'general-knowledge' ? generalKnowledgePage() : subjectsPage();
+  if (page === 'lesson') app.innerHTML = lessonPage();
+  if (page === 'teacher') app.innerHTML = ['teacher', 'principal'].includes(role) ? teacherPage() : dashboard();
+  if (page === 'slides') app.innerHTML = slidesPage();
+  applyBranding();
+  bindEvents();
+}
 
 async function bootstrap() {
   hydrateLessonHistory();
+  sessionStorage.removeItem('opta-preview-session');
+  sessionStorage.removeItem('opta-preview-profile');
   const { lessons: sharedLessons } = await getSharedLessons();
   if (sharedLessons.length) {
     const saved = JSON.parse(localStorage.getItem('learn-fola-shared-lessons') || '[]');
     const merged = [...saved, ...sharedLessons].filter((lesson, index, all) => all.findIndex((entry) => entry.id === lesson.id) === index);
     localStorage.setItem('learn-fola-shared-lessons', JSON.stringify(merged));
-  }
-  if (sessionStorage.getItem('opta-preview-session') === 'true') {
-    currentUser = { uid: 'onboarding-preview', displayName: 'Learner', email: '' };
-    currentProfile = JSON.parse(sessionStorage.getItem('opta-preview-profile') || '{"id":"onboarding-preview","requested_role":"student","grade_id":7,"onboarding_complete":true}');
-    renderAuthFlow();
-    return;
   }
   renderAuthFlow();
   initializeAuth().then(async () => {
@@ -302,9 +615,25 @@ async function bootstrap() {
     if (!session?.user) return;
     currentUser = session.user;
     const result = await getProfile(currentUser.uid);
-    currentProfile = result.profile || localProfile(currentUser);
-    if (!result.profile && authConfig.configured) {
-      const saved = await saveOnboarding({ id: currentUser.uid, full_name: userName(), email: currentUser.email, avatar_url: currentUser.photoURL || '' });
+    const liveProfile = localProfile(currentUser);
+    const blendedProfile = {
+      ...(result.profile || {}),
+      ...liveProfile,
+      id: currentUser.uid,
+      full_name: liveProfile.full_name || result.profile?.full_name || getGoogleDisplayName() || 'Learner',
+      email: currentUser.email || liveProfile.email || result.profile?.email || '',
+      avatar_url: liveProfile.avatar_url || result.profile?.avatar_url || getAccountAvatar() || ''
+    };
+    currentProfile = blendedProfile;
+    if (authConfig.configured) {
+      const saved = await saveOnboarding({
+        id: currentUser.uid,
+        full_name: currentProfile.full_name,
+        email: currentProfile.email,
+        avatar_url: currentProfile.avatar_url || '',
+        requested_role: currentProfile.requested_role || null,
+        grade_id: currentProfile.grade_id || null
+      });
       currentProfile = saved.profile || currentProfile;
     }
     renderAuthFlow();
@@ -341,6 +670,13 @@ function bindEvents() {
       fileRow.className = 'form-group';
       fileRow.innerHTML = '<label for="teacher-video-file" id="teacher-video-file-label">Choose a video file</label><input class="field" id="teacher-video-file" type="file" accept="video/*" />';
       sourceField.closest('.form-group').insertAdjacentElement('afterend', fileRow);
+    }
+  }
+  if (page === 'dashboard') {
+    const avatar = document.querySelector('.avatar img') || document.querySelector('.avatar');
+    if (avatar && getAccountAvatar()) {
+      avatar.src = getAccountAvatar();
+      avatar.alt = userName();
     }
   }
   bindLessonHistoryEvents();

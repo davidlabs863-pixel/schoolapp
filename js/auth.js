@@ -163,11 +163,13 @@ export async function saveOnboarding(profile) {
 export function localProfile(user) {
   const userId = user?.uid || user?.id || 'guest';
   const saved = JSON.parse(localStorage.getItem(`opta-profile:${userId}`) || 'null');
-  return saved || {
+  const avatarUrl = user?.photoURL || user?.user_metadata?.avatar_url || user?.user_metadata?.picture || user?.avatar_url || saved?.avatar_url || '';
+  const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.displayName || user?.full_name || saved?.full_name || '';
+  return saved ? { ...saved, full_name: fullName || saved.full_name || '', avatar_url: avatarUrl || saved.avatar_url || '' } : {
     id: userId,
-    full_name: user?.displayName || '',
+    full_name: fullName,
     email: user?.email || '',
-    avatar_url: user?.photoURL || '',
+    avatar_url: avatarUrl,
     requested_role: null,
     grade_id: null,
     role: 'student'

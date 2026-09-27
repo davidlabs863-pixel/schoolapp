@@ -42,6 +42,121 @@ export const slideDeck = [
 
 export const stats = { lessons: 248, videos: 186, teachers: 42, students: '2.4k' };
 
+export const academyRoleData = {
+  student: {
+    summary: 'Keep building momentum with targeted learning and support.',
+    metrics: [
+      { label: 'Learning streak', value: '3 days', delta: '+1 from last week' },
+      { label: 'Lessons completed', value: '24', delta: '+6 this month' },
+      { label: 'Watch time', value: '8.4h', delta: '+18% this month' },
+      { label: 'Saved for later', value: '12', delta: '3 new this week' }
+    ],
+    progress: [
+      { label: 'Mathematics', value: 80, tone: 'coral' },
+      { label: 'English Language', value: 60, tone: 'mint' },
+      { label: 'Basic Science', value: 70, tone: 'amber' },
+      { label: 'History', value: 42, tone: 'coral' }
+    ],
+    recommendations: [
+      { title: 'Fractions fluency', subject: 'Mathematics', reason: 'Build confidence with equivalent fractions before your next checkpoint.', progress: 68, difficulty: 'Core' },
+      { title: 'Paragraph structure', subject: 'English', reason: 'Strengthen topic sentences and evidence before the writing task.', progress: 54, difficulty: 'Stretch' },
+      { title: 'The water cycle', subject: 'Science', reason: 'Review the stages of evaporation and condensation to improve retention.', progress: 76, difficulty: 'Core' }
+    ],
+    assignments: [
+      { title: 'Decimals check-in', due: 'Due tomorrow', status: 'In progress' },
+      { title: 'Reading reflection', due: 'Due Friday', status: 'Assigned' },
+      { title: 'Plant investigation', due: 'Due next week', status: 'Assigned' }
+    ],
+    achievements: [
+      { title: 'First lesson completed', unlocked: true },
+      { title: 'Perfect session', unlocked: false },
+      { title: 'Consistency award', unlocked: true }
+    ],
+    activity: [
+      { label: 'Fractions made visual', detail: 'Completed 18 min lesson', badge: '▶' },
+      { label: 'Science quiz review', detail: 'Scored 87%', badge: '✓' },
+      { label: 'Reading check-in', detail: 'Practiced 2 new skills', badge: '✎' }
+    ]
+  },
+  teacher: {
+    summary: 'Track class performance, identify growth areas, and support students who need attention.',
+    metrics: [
+      { label: 'Students', value: '286', delta: '+14 this term' },
+      { label: 'Questions answered', value: '4,280', delta: '+18% this month' },
+      { label: 'Skills mastered', value: '132', delta: '+9 this week' },
+      { label: 'Assignments complete', value: '78%', delta: '+11% from last cycle' }
+    ],
+    support: [
+      { name: 'Aisha O.', subject: 'Mathematics', need: 'Needs support with fractions', progress: 46 },
+      { name: 'Daniel K.', subject: 'English', need: 'Needs stronger comprehension tasks', progress: 58 },
+      { name: 'Tariq Y.', subject: 'Science', need: 'Needs reinforcement in ecosystems', progress: 52 }
+    ],
+    assignments: [
+      { title: 'Review and revise', due: 'Today', status: 'Assigned' },
+      { title: 'Diagnostic check-in', due: 'Tomorrow', status: 'In progress' },
+      { title: 'Class challenge', due: 'This Friday', status: 'Draft' }
+    ],
+    activity: [
+      { label: 'Fractions mastery tracker', detail: 'Updated for Grade 7', badge: '◎' },
+      { label: 'Reading support plan', detail: 'Assigned to 4 learners', badge: '✦' },
+      { label: 'Live classroom', detail: '6 students currently active', badge: '◔' }
+    ]
+  },
+  parent: {
+    summary: 'See your child’s progress, assignments, and areas to support at home.',
+    metrics: [
+      { label: 'Child progress', value: '76%', delta: '+8% this month' },
+      { label: 'Assignments', value: '5', delta: '2 due this week' },
+      { label: 'Time online', value: '6.2h', delta: '+1.4h this week' },
+      { label: 'Achievements', value: '9', delta: '2 unlocked recently' }
+    ],
+    children: [
+      { name: 'Tosin A.', grade: 'Grade 7', status: 'Steady progress', focus: 'Fractions and reading' },
+      { name: 'Mira A.', grade: 'Grade 5', status: 'Strong growth', focus: 'Science experiments' }
+    ],
+    activities: [
+      { title: 'Reading task due', detail: 'Submit by Friday', status: 'Due soon' },
+      { title: 'Science quiz complete', detail: '87% score achieved', status: 'Good work' },
+      { title: 'Recommendation', detail: 'Try another fractions activity', status: 'Suggested' }
+    ]
+  },
+  admin: {
+    summary: 'Monitor schoolwide learning, teacher activity, and progress trends across the academy.',
+    metrics: [
+      { label: 'Active students', value: '1,824', delta: '+12% this term' },
+      { label: 'Active teachers', value: '42', delta: '+4 this term' },
+      { label: 'Assignments tracked', value: '469', delta: '78% completion' },
+      { label: 'School progress', value: '74%', delta: '+6% vs last cycle' }
+    ],
+    school: [
+      { title: 'Mathematics', value: '81%', color: 'coral' },
+      { title: 'English', value: '76%', color: 'mint' },
+      { title: 'Science', value: '79%', color: 'amber' },
+      { title: 'History', value: '68%', color: 'violet' }
+    ],
+    reports: [
+      { name: 'Grade 7 proficiency', detail: 'Mathematics rising by 8%', status: 'Healthy' },
+      { name: 'Teacher workload', detail: 'Support needed in English team', status: 'Monitor' },
+      { name: 'Diagnostic insights', detail: 'New intervention plan ready', status: 'Action needed' }
+    ]
+  }
+};
+
+export const academySearchIndex = [
+  'Fractions practice',
+  'Mathematics grade 7',
+  'English reading strategies',
+  'Science water cycle',
+  'Teacher assignments',
+  'Student progress dashboard',
+  'Diagnostics results',
+  'Recommendations',
+  'Assignments due this week',
+  'Class challenge',
+  'School analytics',
+  'Parent progress summary'
+];
+
 function getStoredSharedLessons() {
   if (typeof window === 'undefined') return [];
   try {
