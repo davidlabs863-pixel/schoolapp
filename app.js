@@ -11,14 +11,56 @@ let currentProfile = null;
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
 const subjectName = (id) => getSubject(id).name;
 const icon = (symbol) => `<span class="side-icon">${symbol}</span>`;
-const getGoogleDisplayName = () => currentUser?.user_metadata?.full_name || currentUser?.user_metadata?.name || currentUser?.user_metadata?.given_name || currentUser?.displayName || currentUser?.full_name || currentProfile?.full_name || '';
-const getAccountAvatar = () => currentUser?.photoURL || currentUser?.user_metadata?.avatar_url || currentUser?.user_metadata?.picture || currentUser?.avatar_url || currentProfile?.avatar_url || '';
+const getStoredProfile = (userId) => {
+  if (!userId) return null;
+  try {
+    const stored = JSON.parse(localStorage.getItem(`opta-profile:${userId}`) || 'null');
+    return stored || null;
+  } catch (error) {
+    return null;
+  }
+};
+const getLastKnownProfile = () => {
+  const activeId = localStorage.getItem('opta-active-profile-id');
+  if (!activeId) return null;
+  return getStoredProfile(activeId);
+};
+const persistActiveProfile = (profile) => {
+  if (!profile?.id) return;
+  localStorage.setItem('opta-active-profile-id', profile.id);
+  localStorage.setItem(`opta-profile:${profile.id}`, JSON.stringify(profile));
+};
+const getGoogleDisplayName = () => currentUser?.user_metadata?.full_name || currentUser?.user_metadata?.name || currentUser?.user_metadata?.given_name || currentUser?.displayName || currentUser?.full_name || currentProfile?.full_name || getLastKnownProfile()?.full_name || '';
+const getAccountAvatar = () => currentUser?.photoURL || currentUser?.user_metadata?.avatar_url || currentUser?.user_metadata?.picture || currentUser?.user_metadata?.image_url || currentUser?.avatar_url || currentProfile?.avatar_url || currentProfile?.picture || getLastKnownProfile()?.avatar_url || getLastKnownProfile()?.picture || '';
 const userName = () => getGoogleDisplayName() || 'Learner';
 const userInitials = () => userName().split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
 function getDurationMinutes(value = '0 min') {
   const match = String(value).match(/(\d+)/);
   return match ? parseInt(match[1], 10) : 0;
+}
+
+function getLiveClasses() {
+  const defaults = [
+    { id: 'class-1', title: 'Grade 7 Mathematics Clinic', grade: 7, subject: 'math', teacher: 'Amaka Okoye', time: 'Today · 3:00 PM', students: 18, status: 'Live', teacherId: 'default-teacher' },
+    { id: 'class-2', title: 'Grade 5 Reading Circle', grade: 5, subject: 'english', teacher: 'Sarah Bello', time: 'Tomorrow · 4:30 PM', students: 12, status: 'Scheduled', teacherId: 'default-teacher' },
+    { id: 'class-3', title: 'Grade 9 Science Lab', grade: 9, subject: 'science', teacher: 'David Mensah', time: 'Friday · 9:00 AM', students: 21, status: 'Planned', teacherId: 'default-teacher' }
+  ];
+  try {
+    const stored = JSON.parse(localStorage.getItem('learn-fola-live-classes') || '[]');
+    return Array.isArray(stored) && stored.length ? [...defaults, ...stored] : defaults;
+  } catch (error) {
+    return defaults;
+  }
+}
+
+function pairLiveClassesForRole(profileRole) {
+  const gradeId = Number(currentProfile?.grade_id || currentUser?.grade_id || 7);
+  const teacherId = currentUser?.id || currentUser?.uid || 'default-teacher';
+  return getLiveClasses().filter((entry) => {
+    if (profileRole === 'teacher') return entry.teacherId === teacherId || entry.teacherId === 'default-teacher';
+    return Number(entry.grade) === gradeId;
+  });
 }
 
 function getStudentDashboardData() {
@@ -38,6 +80,7 @@ function getStudentDashboardData() {
     badge: lesson.videoType === 'upload' ? '▣' : '▶'
   }));
 
+  const liveClasses = pairLiveClassesForRole('student').slice(0, 2);
   const totalMinutes = relevantLessons.reduce((sum, lesson) => sum + getDurationMinutes(lesson.duration), 0);
   const completed = Math.max(6, relevantLessons.length + 10);
   const savedCount = getLessonHistory().length + Math.max(0, relevantLessons.length - 2);
@@ -45,6 +88,7 @@ function getStudentDashboardData() {
   return {
     dateLabel: 'Today',
     name: userName(),
+    liveClasses,
     metrics: [
       { label: 'Learning streak', value: `${Math.min(12, 3 + Math.max(0, Math.floor(relevantLessons.length / 2)))} days`, delta: '+1 from last week' },
       { label: 'Lessons completed', value: String(completed), delta: `+${Math.max(3, Math.floor(relevantLessons.length / 2))} this month` },
@@ -97,7 +141,10 @@ function roleOnboarding(role) {
 }
 
 function renderAuthFlow() {
-  if (!currentUser) {
+  const storedProfile = getLastKnownProfile();
+  if (!currentUser && storedProfile) currentProfile = storedProfile;
+
+  if (!currentUser && !storedProfile) {
     if (protectedPages.has(page)) {
       window.location.href = 'index.html';
       return;
@@ -105,6 +152,11 @@ function renderAuthFlow() {
     app.innerHTML = authScreen(authConfig.configured ? '' : 'Supabase is not configured yet. Add your project URL and anon key to enable Google sign-in.');
     applyBranding();
     bindAuthEvents();
+    return;
+  }
+
+  if (!currentUser && currentProfile?.requested_role) {
+    render();
     return;
   }
 
@@ -151,28 +203,28 @@ function bindAuthEvents() {
       showToast('This account is already set to a role. Use a different Google account to switch roles.');
       return;
     }
-    currentProfile = { ...currentProfile, requested_role: role };
-    localStorage.setItem(`opta-profile:${currentProfile.id}`, JSON.stringify(currentProfile));
+    currentProfile = { ...(currentProfile || {}), requested_role: role, id: currentProfile?.id || currentUser?.uid || 'guest' };
+    persistActiveProfile(currentProfile);
     if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile));
     renderAuthFlow();
     if (currentProfile.id !== 'onboarding-preview') saveOnboarding({ id: currentProfile.id, requested_role: role }).catch((error) => console.error('Role preference could not be saved', error));
   }));
   document.querySelectorAll('[data-grade]').forEach((card) => card.addEventListener('click', async () => {
     const grade = Number(card.dataset.grade);
-    currentProfile = { ...currentProfile, grade_id: grade, onboarding_complete: true };
-    localStorage.setItem(`opta-profile:${currentProfile.id}`, JSON.stringify(currentProfile));
+    currentProfile = { ...(currentProfile || {}), id: currentProfile?.id || currentUser?.uid || 'guest', grade_id: grade, onboarding_complete: true };
+    persistActiveProfile(currentProfile);
     if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile));
     renderAuthFlow();
     if (currentProfile.id !== 'onboarding-preview') saveOnboarding({ id: currentProfile.id, requested_role: 'student', grade_id: grade }).catch((error) => console.error('Grade preference could not be saved', error));
   }));
   document.querySelector('#finish-onboarding')?.addEventListener('click', async () => {
-    currentProfile = { ...currentProfile, onboarding_complete: true };
-    localStorage.setItem(`opta-profile:${currentProfile.id}`, JSON.stringify(currentProfile));
+    currentProfile = { ...(currentProfile || {}), id: currentProfile?.id || currentUser?.uid || 'guest', onboarding_complete: true };
+    persistActiveProfile(currentProfile);
     if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile));
     renderAuthFlow();
     if (currentProfile.id !== 'onboarding-preview') saveOnboarding({ id: currentProfile.id, requested_role: currentProfile.requested_role }).catch((error) => console.error('Role request could not be saved', error));
   });
-  document.querySelector('#back-to-roles')?.addEventListener('click', () => { currentProfile = { ...currentProfile, requested_role: null, grade_id: null }; if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile)); renderAuthFlow(); });
+  document.querySelector('#back-to-roles')?.addEventListener('click', () => { currentProfile = { ...(currentProfile || {}), id: currentProfile?.id || currentUser?.uid || 'guest', requested_role: null, grade_id: null }; if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile)); persistActiveProfile(currentProfile); renderAuthFlow(); });
 }
 
 function navLink(href, label, symbol, active = false) { return `<a class="side-link ${active ? 'active' : ''}" href="${href}">${icon(symbol)}${label}</a>`; }
@@ -195,7 +247,7 @@ function shell(content, title = 'Overview') {
       <div class="sidebar-footer"><strong>Learning streak</strong>3 days in a row. Keep the momentum going.</div>
     </aside>
     <main class="app-main">
-      <header class="app-topbar"><div class="breadcrumb"><span>Learn With Fola</span> <b>/</b> <strong>${title}</strong></div><div class="search-box">⌕ <input id="global-search" placeholder="Search lessons, topics..." aria-label="Search lessons" /></div><div class="top-actions"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button><div class="avatar">${currentProfile?.avatar_url ? `<img src="${escapeHtml(currentProfile.avatar_url)}" alt="${escapeHtml(userName())}" />` : userInitials()}</div></div></header>
+      <header class="app-topbar"><div class="breadcrumb"><span>Learn With Fola</span> <b>/</b> <strong>${title}</strong></div><div class="search-box">⌕ <input id="global-search" placeholder="Search lessons, topics..." aria-label="Search lessons" /></div><div class="top-actions"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button><div class="avatar">${getAccountAvatar() ? `<img src="${escapeHtml(getAccountAvatar())}" alt="${escapeHtml(userName())}" />` : userInitials()}</div></div></header>
       ${content}
     </main>
   </div><div class="toast" id="toast"></div>`;
@@ -246,6 +298,37 @@ function hydrateLessonHistory() {
 }
 
 function bindLessonHistoryEvents() {
+  const liveForm = document.querySelector('#create-live-class-form');
+  if (liveForm && !liveForm.dataset.bound) {
+    liveForm.dataset.bound = 'true';
+    liveForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const title = document.querySelector('#live-class-title')?.value?.trim();
+      const grade = Number(document.querySelector('#live-class-grade')?.value || 7);
+      const subject = document.querySelector('#live-class-subject')?.value || 'math';
+      const time = document.querySelector('#live-class-time')?.value?.trim() || 'Today · 3:00 PM';
+      const students = Number(document.querySelector('#live-class-students')?.value || 18);
+      const classEntry = {
+        id: `live-${Date.now()}`,
+        title: title || `Grade ${grade} ${getSubject(subject).name}`,
+        grade,
+        subject,
+        teacher: userName(),
+        time,
+        students,
+        status: 'Live',
+        teacherId: currentUser?.id || currentUser?.uid || 'default-teacher'
+      };
+      const existing = getLiveClasses();
+      const updated = [classEntry, ...existing.filter((item) => item.id !== classEntry.id)];
+      localStorage.setItem('learn-fola-live-classes', JSON.stringify(updated));
+      showToast('Live class scheduled for your students.');
+      liveForm.reset();
+      document.querySelector('#live-class-form')?.style.setProperty('display', 'none');
+      render();
+    });
+  }
+
   const form = document.querySelector('#create-form');
   if (!form) return;
   const fileInput = document.querySelector('#teacher-video-file');
@@ -346,6 +429,15 @@ function dashboard() {
       </div>
     </div>
   `).join('');
+  const liveClassRows = (studentData.liveClasses || []).map((liveClass) => `
+    <div class="activity">
+      <div class="activity-dot">◎</div>
+      <div>
+        <p>${liveClass.title}</p>
+        <small>${liveClass.time} · ${liveClass.teacher} · ${liveClass.status}</small>
+      </div>
+    </div>
+  `).join('') || '<div class="empty-state">No live classes for your grade yet.</div>';
   const metricCards = studentData.metrics.map((item) => `
     <div class="metric">
       <span class="metric-label">${item.label}</span>
@@ -354,7 +446,7 @@ function dashboard() {
     </div>
   `).join('');
 
-  return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">${studentData.dateLabel}</div><h1>Welcome back, ${escapeHtml(studentData.name)}.</h1><p>Pick up where you left off and keep your curiosity moving.</p></div><a class="btn btn-primary" href="grades.html">Find a lesson →</a></div><div class="metrics">${metricCards}</div><div class="dashboard-grid"><section class="panel" id="progress"><div class="panel-heading"><h2>Your progress</h2><span>Across your subjects</span></div>${progressRows}</section><section class="panel"><div class="panel-heading"><h2>Recently watched</h2><span>See all →</span></div>${recentRows}</section></div></div>`, 'Dashboard');
+  return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">${studentData.dateLabel}</div><h1>Welcome back, ${escapeHtml(studentData.name)}.</h1><p>Pick up where you left off and keep your curiosity moving.</p></div><a class="btn btn-primary" href="grades.html">Find a lesson →</a></div><div class="metrics">${metricCards}</div><div class="dashboard-grid"><section class="panel" id="progress"><div class="panel-heading"><h2>Your progress</h2><span>Across your subjects</span></div>${progressRows}</section><section class="panel"><div class="panel-heading"><h2>Recently watched</h2><span>See all →</span></div>${recentRows}</section></div><div class="panel" style="margin-top:18px"><div class="panel-heading"><h2>Live classes for your grade</h2><span>Join now</span></div>${liveClassRows}</div></div>`, 'Dashboard');
 }
 
 function gradesPage() { return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">Your learning map</div><h1>Choose a grade.</h1><p>Start with where you are, then go wherever your questions lead.</p></div><div class="filter-bar"><input class="field" id="grade-search" placeholder="Search a grade..." /></div></div><div class="grade-grid" id="grade-grid">${allGrades.map(gradeCard).join('')}</div></div>`, 'Browse grades'); }
@@ -371,11 +463,7 @@ function lessonPage() { const lesson = getLesson(params.get('id')); return shell
 
 function teacherPage() {
   const teacherData = academyRoleData.teacher || academyRoleData.student;
-  const teacherRosters = [
-    { title: 'Grade 7 Mathematics', time: 'Today · 3:00 PM', students: 18, status: 'Live' },
-    { title: 'Grade 5 English', time: 'Today · 4:30 PM', students: 12, status: 'Scheduled' },
-    { title: 'Grade 9 Science', time: 'Tomorrow · 9:00 AM', students: 21, status: 'Planned' }
-  ];
+  const teacherRosters = pairLiveClassesForRole('teacher');
   const liveClassRows = teacherRosters.map((classItem) => `
     <div class="activity">
       <div class="activity-dot">◎</div>
@@ -433,7 +521,10 @@ function teacherPage() {
         <h1>Lead learning with clarity.</h1>
         <p>${teacherData.summary}</p>
       </div>
-      <button class="btn btn-primary" id="new-lesson">＋ Create lesson</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap">
+        <button class="btn btn-primary" id="new-live-class">＋ Start live class</button>
+        <button class="btn btn-ghost" id="new-lesson">＋ Create lesson</button>
+      </div>
     </div>
     <div class="metrics">${metricCards}</div>
     <div class="dashboard-grid">
@@ -449,6 +540,20 @@ function teacherPage() {
     <div class="panel" style="margin-top:18px">
       <div class="panel-heading"><h2>Upcoming classroom work</h2><span>Live plan</span></div>
       ${assignmentRows}
+    </div>
+    <div class="panel" id="live-class-form" style="display:none;margin-top:18px;margin-bottom:20px">
+      <div class="panel-heading"><h2>Create a live class</h2><span>Start classroom time in one click</span></div>
+      <form class="form-grid" id="create-live-class-form">
+        <div class="form-group"><label for="live-class-title">Class title</label><input class="field" id="live-class-title" placeholder="Grade 7 Mathematics Clinic" required /></div>
+        <div class="form-group"><label for="live-class-grade">Grade</label><select class="select-field" id="live-class-grade" required>${allGrades.map((grade) => `<option value="${grade.id}">${grade.label}</option>`).join('')}</select></div>
+        <div class="form-group"><label for="live-class-subject">Subject</label><select class="select-field" id="live-class-subject" required>${subjects.map((subject) => `<option value="${subject.id}">${subject.name}</option>`).join('')}</select></div>
+        <div class="form-group"><label for="live-class-time">Schedule</label><input class="field" id="live-class-time" placeholder="Today · 3:00 PM" required /></div>
+        <div class="form-group"><label for="live-class-students">Students</label><input class="field" id="live-class-students" type="number" min="1" value="18" /></div>
+        <div class="form-actions" style="grid-column:1 / -1; display:flex; gap:10px; flex-wrap:wrap">
+          <button class="btn btn-primary" type="submit">Start class</button>
+          <button class="btn btn-ghost" type="button" data-close-live-class>Cancel</button>
+        </div>
+      </form>
     </div>
     <div class="panel" id="lesson-form" style="display:none;margin-bottom:20px">
       <div class="panel-heading"><h2>Create a lesson</h2><span>Saved locally for your classroom</span></div>
@@ -612,22 +717,32 @@ async function bootstrap() {
   renderAuthFlow();
   initializeAuth().then(async () => {
     const { session } = await getSession();
-    if (!session?.user) return;
+    if (!session?.user) {
+      const restoredProfile = getLastKnownProfile();
+      if (restoredProfile) {
+        currentProfile = restoredProfile;
+        renderAuthFlow();
+      }
+      return;
+    }
     currentUser = session.user;
-    const result = await getProfile(currentUser.uid);
+    const lastKnownProfile = getStoredProfile(currentUser.id || currentUser.uid);
+    const result = await getProfile(currentUser.id || currentUser.uid);
     const liveProfile = localProfile(currentUser);
     const blendedProfile = {
+      ...(lastKnownProfile || {}),
       ...(result.profile || {}),
       ...liveProfile,
-      id: currentUser.uid,
-      full_name: liveProfile.full_name || result.profile?.full_name || getGoogleDisplayName() || 'Learner',
-      email: currentUser.email || liveProfile.email || result.profile?.email || '',
-      avatar_url: liveProfile.avatar_url || result.profile?.avatar_url || getAccountAvatar() || ''
+      id: currentUser.id || currentUser.uid,
+      full_name: liveProfile.full_name || result.profile?.full_name || lastKnownProfile?.full_name || getGoogleDisplayName() || 'Learner',
+      email: currentUser.email || liveProfile.email || result.profile?.email || lastKnownProfile?.email || '',
+      avatar_url: liveProfile.avatar_url || result.profile?.avatar_url || lastKnownProfile?.avatar_url || getAccountAvatar() || ''
     };
     currentProfile = blendedProfile;
+    persistActiveProfile(currentProfile);
     if (authConfig.configured) {
       const saved = await saveOnboarding({
-        id: currentUser.uid,
+        id: currentProfile.id,
         full_name: currentProfile.full_name,
         email: currentProfile.email,
         avatar_url: currentProfile.avatar_url || '',
@@ -635,6 +750,7 @@ async function bootstrap() {
         grade_id: currentProfile.grade_id || null
       });
       currentProfile = saved.profile || currentProfile;
+      persistActiveProfile(currentProfile);
     }
     renderAuthFlow();
   }).catch((error) => console.error('Supabase session restore failed', error));
@@ -683,6 +799,8 @@ function bindEvents() {
   document.querySelector('#mobile-menu')?.addEventListener('click', () => document.querySelector('#sidebar')?.classList.toggle('open'));
   document.querySelector('#save-lesson')?.addEventListener('click', (event) => { event.currentTarget.textContent = '✓ Saved to your lessons'; event.currentTarget.classList.add('btn-primary'); showToast('Lesson saved to your learning space.'); });
   document.querySelector('#new-lesson')?.addEventListener('click', () => { const form = document.querySelector('#lesson-form'); form.style.display = form.style.display === 'none' ? 'block' : 'none'; form.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  document.querySelector('[data-close-live-class]')?.addEventListener('click', () => { const form = document.querySelector('#live-class-form'); if (form) form.style.display = 'none'; });
+  document.querySelector('#new-live-class')?.addEventListener('click', () => { const form = document.querySelector('#live-class-form'); if (form) { form.style.display = form.style.display === 'none' ? 'block' : 'none'; form.scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
   document.querySelector('[data-save="draft"]')?.addEventListener('click', () => { localStorage.setItem('opta-draft', 'saved'); showToast('Draft saved locally.'); });
   document.querySelector('#grade-search')?.addEventListener('input', (event) => { document.querySelectorAll('#grade-grid .grade-card').forEach((card) => { card.style.display = card.textContent.toLowerCase().includes(event.target.value.toLowerCase()) ? '' : 'none'; }); });
   document.querySelector('#difficulty-filter')?.addEventListener('change', (event) => { document.querySelectorAll('#lesson-results .lesson-card').forEach((card) => { card.style.display = event.target.value === 'all' || card.textContent.includes(event.target.value) ? '' : 'none'; }); });
