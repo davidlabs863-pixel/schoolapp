@@ -290,7 +290,8 @@ function renderAuthFlow() {
     return;
   }
 
-  if (['teacher', 'principal'].includes(currentProfile.requested_role) && !Array.isArray(currentProfile.class_ids) || (Array.isArray(currentProfile.class_ids) && currentProfile.class_ids.length === 0)) {
+  const needsTeacherClassSetup = ['teacher', 'principal'].includes(currentProfile.requested_role) && !currentProfile.onboarding_complete && (!Array.isArray(currentProfile.class_ids) || currentProfile.class_ids.length === 0);
+  if (needsTeacherClassSetup) {
     app.innerHTML = roleOnboarding(currentProfile.requested_role);
     applyBranding();
     bindAuthEvents();
