@@ -35,6 +35,28 @@ const getGoogleDisplayName = () => currentUser?.user_metadata?.full_name || curr
 const getAccountAvatar = () => currentUser?.photoURL || currentUser?.user_metadata?.avatar_url || currentUser?.user_metadata?.picture || currentUser?.user_metadata?.image_url || currentUser?.avatar_url || currentProfile?.avatar_url || currentProfile?.picture || getLastKnownProfile()?.avatar_url || getLastKnownProfile()?.picture || '';
 const userName = () => getGoogleDisplayName() || 'Learner';
 const userInitials = () => userName().split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+const avatarOptions = [
+  { id: 'avatar-sunrise', name: 'Sunrise', src: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80' },
+  { id: 'avatar-garden', name: 'Garden', src: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=300&q=80' },
+  { id: 'avatar-ocean', name: 'Ocean', src: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=300&q=80' },
+  { id: 'avatar-forest', name: 'Forest', src: 'https://images.unsplash.com/photo-1504593811423-6dd665756598?auto=format&fit=crop&w=300&q=80' },
+  { id: 'avatar-sky', name: 'Sky', src: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=300&q=80' },
+  { id: 'avatar-oasis', name: 'Oasis', src: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=300&q=80' }
+];
+
+function clearSignedInState() {
+  const activeId = currentProfile?.id || currentUser?.id || currentUser?.uid || localStorage.getItem('opta-active-profile-id');
+  if (activeId) {
+    localStorage.removeItem(`opta-profile:${activeId}`);
+  }
+  localStorage.removeItem('opta-active-profile-id');
+  currentUser = null;
+  currentProfile = null;
+}
+
+function getAvatarSettingTarget() {
+  return page === 'home' ? 'index.html?view=settings' : `${window.location.pathname.replace(/\/[^/]+$/, '') || ''}/dashboard.html?view=settings`;
+}
 
 function getDurationMinutes(value = '0 min') {
   const match = String(value).match(/(\d+)/);
@@ -198,7 +220,12 @@ function roleSelection() {
     ['parent', '♡', 'PARENT', "Follow your child's learning progress and communicate with teachers."],
     ['principal', '▦', 'PRINCIPAL', 'Oversee teaching, learning and school communication.']
   ];
-  return `<main class="onboarding-screen"><div class="onboarding-wrap"><div class="onboarding-top"><a class="brand" href="index.html"><img class="brand-logo" src="${authLogo()}" alt="Learn With Fola logo">Learn With Fola</a><span>Step 1 of 2</span></div><div class="onboarding-heading"><div class="eyebrow">Welcome, ${escapeHtml(userName())}</div><h1>How will you use Learn With Fola?</h1><p>Choose your role to continue.</p><div class="role-lock-note">One account, one role at a time.</div></div><div class="role-grid">${roles.map(([id, symbol, title, description]) => `<button class="role-card" data-role="${id}"><span class="role-icon">${symbol}</span><strong>${title}</strong><span>${description}</span><b>Continue <i>→</i></b></button>`).join('')}</div><button class="text-button" id="auth-sign-out">Sign out</button></div></main>`;
+  return `<main class="onboarding-screen"><div class="onboarding-wrap"><div class="onboarding-top"><a class="brand" href="index.html"><img class="brand-logo" src="${authLogo()}" alt="Learn With Fola logo">Learn With Fola</a><span>Step 1 of 2</span></div><div class="onboarding-heading"><div class="eyebrow">Welcome, ${escapeHtml(userName())}</div><h1>How will you use Learn With Fola?</h1><p>Choose your role to continue.</p><div class="role-lock-note">One account, one role at a time.</div></div><div class="role-grid">${roles.map(([id, symbol, title, description]) => `<button class="role-card" data-role="${id}"><span class="role-icon">${symbol}</span><strong>${title}</strong><span>${description}</span><b>Continue <i>→</i></b></button>`).join('')}</div><button class="text-button" data-profile-action="sign-out" id="auth-sign-out">Sign out</button></div></main>`;
+}
+
+function avatarSettingsPage() {
+  const activeAvatar = getAccountAvatar() || avatarOptions[0].src;
+  return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">Profile settings</div><h1>Choose your avatar</h1><p>Pick an image that represents you across the academy.</p></div><a class="btn btn-ghost" href="dashboard.html">Back to dashboard</a></div><div class="avatar-picker-grid">${avatarOptions.map((option) => `<button type="button" class="avatar-option ${activeAvatar === option.src ? 'selected' : ''}" data-avatar-choice="${escapeHtml(option.src)}" aria-label="Choose ${escapeHtml(option.name)} avatar"><img src="${escapeHtml(option.src)}" alt="${escapeHtml(option.name)} avatar" /><span>${escapeHtml(option.name)}</span></button>`).join('')}</div></div>`, 'Profile settings');
 }
 
 function roleOnboarding(role) {
@@ -239,6 +266,13 @@ function renderAuthFlow() {
 
   if (!currentUser && currentProfile?.requested_role) {
     render();
+    return;
+  }
+
+  if (params.get('view') === 'settings' || params.get('view') === 'avatars') {
+    app.innerHTML = avatarSettingsPage();
+    applyBranding();
+    bindEvents();
     return;
   }
 
@@ -381,7 +415,7 @@ function shell(content, title = 'Overview') {
       <div class="sidebar-footer"><strong>Learning streak</strong>3 days in a row. Keep the momentum going.</div>
     </aside>
     <main class="app-main">
-      <header class="app-topbar"><div class="breadcrumb"><span>Learn With Fola</span> <b>/</b> <strong>${title}</strong></div><div class="search-box">⌕ <input id="global-search" placeholder="Search lessons, topics..." aria-label="Search lessons" /></div><div class="top-actions"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button><div class="avatar">${getAccountAvatar() ? `<img src="${escapeHtml(getAccountAvatar())}" alt="${escapeHtml(userName())}" />` : userInitials()}</div></div></header>
+      <header class="app-topbar"><div class="breadcrumb"><span>Learn With Fola</span> <b>/</b> <strong>${title}</strong></div><div class="search-box">⌕ <input id="global-search" placeholder="Search lessons, topics..." aria-label="Search lessons" /></div><div class="top-actions"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button><div class="profile-menu-wrap"><button class="avatar profile-menu-trigger" type="button" aria-label="Open profile menu">${getAccountAvatar() ? `<img src="${escapeHtml(getAccountAvatar())}" alt="${escapeHtml(userName())}" />` : userInitials()}</button><div class="profile-menu hidden"><button class="profile-menu-item" type="button" data-profile-action="settings">Settings</button><button class="profile-menu-item danger" type="button" data-profile-action="sign-out">Sign out</button></div></div></div></header>
       ${content}
     </main>
   </div><div class="toast" id="toast"></div>`;
@@ -612,11 +646,11 @@ function home() {
   const showMyLearning = !['teacher', 'principal'].includes(role);
   const showTeacherPortal = !['student', 'parent'].includes(role);
   const accountBadge = getAccountAvatar() ? `<img src="${escapeHtml(getAccountAvatar())}" alt="${escapeHtml(userName())}" />` : `<span>${userInitials()}</span>`;
-  const signInButton = signedIn ? `<button class="btn btn-primary btn-small premium-cta profile-button" id="home-profile-button" type="button">${accountBadge}</button>` : `<button class="btn btn-primary btn-small premium-cta" id="home-sign-in">Sign in</button>`;
+  const profileMenu = signedIn ? `<div class="profile-menu-wrap"><button class="btn btn-primary btn-small premium-cta profile-button profile-menu-trigger" id="home-profile-button" type="button">${accountBadge}</button><div class="profile-menu hidden" id="home-profile-menu"><button class="profile-menu-item" type="button" data-profile-action="settings">Settings</button><button class="profile-menu-item danger" type="button" data-profile-action="sign-out">Sign out</button></div></div>` : `<button class="btn btn-primary btn-small premium-cta" id="home-sign-in">Sign in</button>`;
   const mainCtaHref = signedIn ? (showMyLearning ? 'dashboard.html' : 'teacher.html') : 'grades.html';
   const mainCtaLabel = signedIn ? (showMyLearning ? 'Open dashboard' : 'Open workspace') : 'Start learning';
-  return `<header class="site-header premium-header"><a class="brand" href="index.html"><span class="brand-mark">X</span>Learn With Fola</a><nav class="top-nav"><a class="active" href="index.html">Home</a>${showExplore ? '<a href="grades.html">Explore</a>' : ''}${showMyLearning ? '<a href="dashboard.html">My learning</a>' : ''}${showTeacherPortal ? '<a href="teacher.html">For teachers</a>' : ''}</nav><div class="top-actions">${signInButton}${showTeacherPortal && !signedIn ? '<a class="btn btn-ghost btn-small" href="teacher.html">Teacher portal</a>' : ''}<button class="icon-button mobile-menu" id="mobile-menu">☰</button></div></header>
-  <main><section class="hero premium-hero"><div class="hero-inner"><div class="reveal"><div class="eyebrow">A smarter way to learn</div><h1>Learn. Watch.<br>Understand. Grow.</h1><p class="hero-copy">Explore educational videos, lesson notes and interactive learning materials from Grade 1 to Grade 12.</p><div class="hero-actions"><a class="btn btn-primary premium-action" href="${mainCtaHref}">${mainCtaLabel} <span>→</span></a>${signedIn ? '<button class="btn btn-ghost premium-action" id="hero-profile-button" type="button">My profile</button>' : '<button class="btn btn-ghost premium-action" id="hero-sign-in" type="button">Sign in</button>'}</div></div><div class="hero-visual"><div class="floating-label label-one">12 grades · one place</div><img class="hero-logo" src="ChatGPT%20Image%20Sep%2021,%202026,%2003_34_29%20PM.png" alt="Learn With Fola logo"><div class="floating-label label-two">+ 18 min of progress</div></div></div></section>
+  return `<header class="site-header premium-header"><a class="brand" href="index.html"><span class="brand-mark">X</span>Learn With Fola</a><nav class="top-nav"><a class="active" href="index.html">Home</a>${showExplore ? '<a href="grades.html">Explore</a>' : ''}${showMyLearning ? '<a href="dashboard.html">My learning</a>' : ''}${showTeacherPortal ? '<a href="teacher.html">For teachers</a>' : ''}</nav><div class="top-actions">${profileMenu}${showTeacherPortal && !signedIn ? '<a class="btn btn-ghost btn-small" href="teacher.html">Teacher portal</a>' : ''}<button class="icon-button mobile-menu" id="mobile-menu">☰</button></div></header>
+  <main><section class="hero premium-hero"><div class="hero-inner"><div class="reveal"><div class="eyebrow">A smarter way to learn</div><h1>Learn. Watch.<br>Understand. Grow.</h1><p class="hero-copy">Explore educational videos, lesson notes and interactive learning materials from Grade 1 to Grade 12.</p><div class="hero-actions"><a class="btn btn-primary premium-action" href="${mainCtaHref}">${mainCtaLabel} <span>→</span></a>${signedIn ? '<div class="profile-menu-wrap"><button class="btn btn-ghost premium-action profile-menu-trigger" id="hero-profile-button" type="button">My profile</button><div class="profile-menu hidden" id="hero-profile-menu"><button class="profile-menu-item" type="button" data-profile-action="settings">Settings</button><button class="profile-menu-item danger" type="button" data-profile-action="sign-out">Sign out</button></div></div>' : '<button class="btn btn-ghost premium-action" id="hero-sign-in" type="button">Sign in</button>'}</div></div><div class="hero-visual"><div class="floating-label label-one">12 grades · one place</div><img class="hero-logo" src="ChatGPT%20Image%20Sep%2021,%202026,%2003_34_29%20PM.png" alt="Learn With Fola logo"><div class="floating-label label-two">+ 18 min of progress</div></div></div></section>
   <section class="section"><div class="section-head"><div><div class="eyebrow">Picked for you</div><h2>Popular lessons</h2><p>Short, clear lessons for curious minds.</p></div><a class="text-link" href="grades.html">View all lessons →</a></div><div class="content-grid lesson-grid">${featured.map(lessonCard).join('')}</div></section>
   <section class="section tinted"><div class="section-head"><div><div class="eyebrow">Find your level</div><h2>Browse by grade</h2><p>Every learner has a next step.</p></div><a class="text-link" href="grades.html">See all 12 grades →</a></div><div class="content-grid grade-strip">${grades.map(gradeCard).join('')}</div></section>
   <section class="section"><div class="section-head"><div><div class="eyebrow">Explore your curiosity</div><h2>Browse by subject</h2></div></div><div class="content-grid subject-grid">${subjects.slice(0, 6).map((subject) => `<a class="subject-card reveal" href="subjects.html?subject=${subject.id}"><div class="subject-icon color-${subject.color}">${subject.icon}</div><h3>${subject.name}</h3><p>${subject.description}</p></a>`).join('')}</div></section></main><footer class="footer"><span><strong>Learn With Fola</strong> · Educate · Inspire · Empower.</span><span>Built for students, teachers and what comes next.</span></footer>`;
@@ -1148,6 +1182,64 @@ function bindEvents() {
 
   document.querySelector('#home-sign-in')?.addEventListener('click', openAuth);
   document.querySelector('#hero-sign-in')?.addEventListener('click', openAuth);
+
+  document.querySelectorAll('.profile-menu-trigger')?.forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const menu = button.nextElementSibling;
+      if (!menu) return;
+      menu.classList.toggle('hidden');
+    });
+  });
+
+  document.querySelectorAll('[data-profile-action="settings"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const nextUrl = page === 'home' ? 'index.html?view=settings' : `${window.location.pathname}?view=settings`;
+      window.location.href = nextUrl;
+    });
+  });
+
+  document.querySelectorAll('[data-profile-action="sign-out"]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const activeProfileId = currentProfile?.id || currentUser?.id || currentUser?.uid || localStorage.getItem('opta-active-profile-id');
+      if (activeProfileId) {
+        localStorage.removeItem(`opta-profile:${activeProfileId}`);
+      }
+      localStorage.removeItem('opta-active-profile-id');
+      currentUser = null;
+      currentProfile = null;
+      await signOut();
+    });
+  });
+
+  document.querySelectorAll('[data-avatar-choice]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const avatarUrl = button.dataset.avatarChoice;
+      if (!avatarUrl) return;
+      const activeId = currentProfile?.id || currentUser?.id || currentUser?.uid || localStorage.getItem('opta-active-profile-id') || 'guest';
+      const nextProfile = { ...(currentProfile || getLastKnownProfile() || {}), id: activeId, avatar_url: avatarUrl, picture: avatarUrl };
+      currentProfile = nextProfile;
+      persistActiveProfile(nextProfile);
+      saveOnboarding({
+        id: activeId,
+        avatar_url: avatarUrl,
+        picture: avatarUrl,
+        full_name: nextProfile.full_name || userName() || 'Learner',
+        email: nextProfile.email || currentUser?.email || '',
+        requested_role: nextProfile.requested_role || currentProfile?.requested_role || null,
+        grade_id: nextProfile.grade_id || null,
+        class_ids: nextProfile.class_ids || []
+      }).catch(() => undefined);
+      window.location.href = page === 'home' ? 'index.html' : 'dashboard.html';
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    const menuWrap = event.target.closest('.profile-menu-wrap');
+    document.querySelectorAll('.profile-menu').forEach((menu) => {
+      if (!menuWrap || menu !== menuWrap.querySelector('.profile-menu')) menu.classList.add('hidden');
+    });
+  });
 
   const greeting = document.querySelector('.page-heading h1');
   if (greeting && page === 'dashboard') greeting.textContent = `Welcome, ${userName()}.`;
