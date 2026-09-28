@@ -1,4 +1,7 @@
 import { supabase } from '../supabase-config.js';
+import { extractSessionFromUrl, getAuthRedirectUrl } from './auth-helpers.js';
+
+export { extractSessionFromUrl, getAuthRedirectUrl };
 
 export const authConfig = {
   get configured() { return Boolean(supabase); },
@@ -32,7 +35,11 @@ export async function signInWithGoogle() {
   }
 
   try {
-    const { error } = await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
+    const redirectTo = getAuthRedirectUrl();
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo }
+    });
     return { redirecting: !error, user: null, error };
   } catch (error) {
     return { user: null, error };
