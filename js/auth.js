@@ -49,22 +49,25 @@ export async function signInWithGoogle() {
 export async function signOut() {
   const supabaseClient = getSupabaseClient();
   const activeProfileId = localStorage.getItem('opta-active-profile-id');
-  if (supabaseClient) {
-    const userId = supabaseClient.auth.user()?.id || activeProfileId;
-    await supabaseClient.auth.signOut();
+  const userId = supabaseClient?.auth?.user?.()?.id || activeProfileId;
+
+  try {
+    if (supabaseClient) {
+      await supabaseClient.auth.signOut();
+    }
+  } catch (error) {
+    console.error('Supabase sign-out failed:', error);
+  } finally {
     if (userId) localStorage.removeItem(`opta-profile:${userId}`);
     sessionStorage.removeItem('opta-preview-session');
     sessionStorage.removeItem('opta-preview-profile');
     localStorage.removeItem('opta-active-profile-id');
-    window.location.href = 'index.html';
-    return;
+    if (window.location.pathname !== '/index.html') {
+      window.location.assign('index.html');
+    } else {
+      window.location.reload();
+    }
   }
-
-  if (activeProfileId) localStorage.removeItem(`opta-profile:${activeProfileId}`);
-  sessionStorage.removeItem('opta-preview-session');
-  sessionStorage.removeItem('opta-preview-profile');
-  localStorage.removeItem('opta-active-profile-id');
-  window.location.href = 'index.html';
 }
 
 export async function getProfile(userId) {
