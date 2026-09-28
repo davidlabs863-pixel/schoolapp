@@ -58,10 +58,76 @@ function getLiveClasses() {
 function pairLiveClassesForRole(profileRole) {
   const gradeId = Number(currentProfile?.grade_id || currentUser?.grade_id || 7);
   const teacherId = currentUser?.id || currentUser?.uid || 'default-teacher';
-  return getLiveClasses().filter((entry) => {
-    if (profileRole === 'teacher') return entry.teacherId === teacherId || entry.teacherId === 'default-teacher';
-    return Number(entry.grade) === gradeId;
+  const selectedClasses = Array.isArray(currentProfile?.class_ids) ? currentProfile.class_ids : [];
+
+  if (profileRole === 'teacher') {
+    if (selectedClasses.includes('all')) return getLiveClasses();
+    const allowedGrades = selectedClasses.filter((value) => value !== 'all').map((value) => Number(value));
+    if (allowedGrades.length) {
+      return getLiveClasses().filter((entry) => allowedGrades.includes(Number(entry.grade)) || entry.teacherId === teacherId || entry.teacherId === 'default-teacher');
+    }
+    return getLiveClasses().filter((entry) => entry.teacherId === teacherId || entry.teacherId === 'default-teacher');
+  }
+
+  return getLiveClasses().filter((entry) => Number(entry.grade) === gradeId);
+}
+
+function getTeacherClassOptions() {
+  const currentClasses = Array.isArray(currentProfile?.class_ids) ? currentProfile.class_ids : [];
+  if (!currentClasses.length) return allGrades.map((grade) => String(grade.id));
+  if (currentClasses.includes('all')) return ['all', ...allGrades.map((grade) => String(grade.id))];
+  return [...new Set(currentClasses.map((value) => String(value)))];
+}
+
+function getTeacherAssessments() {
+  const defaults = [
+    { id: 'assessment-1', title: 'Grade 7 Mathematics Exit Quiz', classId: '7', subject: 'math', due: 'Tomorrow · 2:00 PM', status: 'Ready', questions: 12 },
+    { id: 'assessment-2', title: 'Grade 5 Reading Checkpoint', classId: '5', subject: 'english', due: 'Friday · 11:30 AM', status: 'Draft', questions: 8 }
+  ];
+
+  try {
+    const stored = JSON.parse(localStorage.getItem('learn-fola-assessments') || '[]');
+    return Array.isArray(stored) && stored.length ? [...defaults, ...stored] : defaults;
+  } catch (error) {
+    return defaults;
+  }
+}
+
+function getStudentAssessments() {
+  const studentGrade = String(Number(currentProfile?.grade_id || currentUser?.grade_id || 7));
+  const selectedClasses = Array.isArray(currentProfile?.class_ids) ? currentProfile.class_ids.map(String) : [];
+
+  return getTeacherAssessments().filter((assessment) => {
+    const targetClass = String(assessment.classId || '');
+    if (!targetClass) return false;
+    if (selectedClasses.includes('all')) return true;
+    return targetClass === studentGrade || selectedClasses.includes(targetClass);
   });
+}
+
+function getAssessmentResults() {
+  try {
+    return JSON.parse(localStorage.getItem('learn-fola-assessment-results') || '[]');
+  } catch (error) {
+    return [];
+  }
+}
+
+function buildAssessmentQuestionBlock(index) {
+  return `
+    <div class="assessment-question" data-question-index="${index}">
+      <div class="form-group full"><label>Question ${index + 1}</label><input class="field" name="assessment-question" placeholder="Type your question" required /></div>
+      <div class="form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px;">
+        <div class="form-group"><label>Option A</label><input class="field" name="assessment-option-a" placeholder="Answer A" required /></div>
+        <div class="form-group"><label>Option B</label><input class="field" name="assessment-option-b" placeholder="Answer B" required /></div>
+        <div class="form-group"><label>Option C</label><input class="field" name="assessment-option-c" placeholder="Answer C" required /></div>
+        <div class="form-group"><label>Option D</label><input class="field" name="assessment-option-d" placeholder="Answer D" required /></div>
+      </div>
+      <div class="form-group"><label>Correct answer</label><select class="select-field" name="assessment-correct">
+        <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
+      </select></div>
+    </div>
+  `;
 }
 
 function getStudentDashboardData() {
@@ -137,8 +203,17 @@ function roleSelection() {
 
 function roleOnboarding(role) {
   if (role === 'student') return `<main class="onboarding-screen"><div class="onboarding-wrap narrow"><div class="onboarding-top"><a class="brand" href="index.html"><img class="brand-logo" src="${authLogo()}" alt="Learn With Fola logo">Learn With Fola</a><span>Step 2 of 2</span></div><div class="onboarding-heading"><div class="eyebrow">Student setup</div><h1>What class are you in?</h1><p>Choose your grade so we can shape your learning space.</p></div><div class="grade-choice-grid">${allGrades.map((grade) => `<button class="grade-choice" data-grade="${grade.id}"><strong>${grade.label}</strong><span>${grade.description}</span><i>→</i></button>`).join('')}</div><button class="text-button" id="back-to-roles">← Back to roles</button></div></main>`;
-  const copy = { teacher: ['Teacher setup', 'Ready to make learning clearer?', 'Your teacher access will be reviewed by an administrator before privileged tools are enabled.'], parent: ['Parent setup', 'Stay close to their learning.', 'Your parent access request will be reviewed before family tools are enabled.'], principal: ['Principal setup', 'Lead learning with a clearer view.', 'Your principal access request will be reviewed before management tools are enabled.'] }[role];
-  return `<main class="onboarding-screen"><div class="onboarding-wrap narrow"><div class="onboarding-top"><a class="brand" href="index.html"><img class="brand-logo" src="${authLogo()}" alt="Learn With Fola logo">Learn With Fola</a><span>Step 2 of 2</span></div><div class="onboarding-heading"><div class="eyebrow">${copy[0]}</div><h1>${copy[1]}</h1><p>${copy[2]}</p></div><section class="request-card"><span class="role-icon">${role === 'teacher' ? '✎' : role === 'parent' ? '♡' : '▦'}</span><h2>Request ${role} access</h2><p>Your selected role is saved as an onboarding request. Actual permissions are controlled securely by the Learn With Fola administration team.</p><button class="btn btn-primary" id="finish-onboarding">Continue to dashboard →</button></section><button class="text-button" id="back-to-roles">← Back to roles</button></div></main>`;
+
+  const selectedClasses = Array.isArray(currentProfile?.class_ids) ? currentProfile.class_ids : [];
+  const gradeChoices = allGrades.map((grade) => {
+    const isSelected = selectedClasses.includes(String(grade.id));
+    return `<button class="grade-choice ${isSelected ? 'selected' : ''}" data-class-choice="${grade.id}" type="button"><strong>${grade.label}</strong><span>${grade.description}</span><i>→</i></button>`;
+  }).join('');
+  const allClassesChoice = role === 'principal' ? `<button class="grade-choice ${selectedClasses.includes('all') ? 'selected' : ''}" data-class-choice="all" type="button"><strong>All classes</strong><span>Manage every class in the school.</span><i>→</i></button>` : '';
+
+  const copy = { teacher: ['Teacher setup', 'Which classes do you teach?', 'Choose the classes you teach and then continue to your workspace.'], parent: ['Parent setup', 'Stay close to their learning.', 'Your parent access request will be reviewed before family tools are enabled.'], principal: ['Principal setup', 'Which classes do you oversee?', 'Only the principal can select all classes. Use this to manage school-wide access and reports.'] }[role];
+
+  return `<main class="onboarding-screen"><div class="onboarding-wrap narrow"><div class="onboarding-top"><a class="brand" href="index.html"><img class="brand-logo" src="${authLogo()}" alt="Learn With Fola logo">Learn With Fola</a><span>Step 2 of 2</span></div><div class="onboarding-heading"><div class="eyebrow">${copy[0]}</div><h1>${copy[1]}</h1><p>${copy[2]}</p></div><div class="grade-choice-grid">${gradeChoices}${allClassesChoice}</div><button class="btn btn-primary" id="finish-onboarding">Continue to dashboard →</button><button class="text-button" id="back-to-roles">← Back to roles</button></div></main>`;
 }
 
 function renderAuthFlow() {
@@ -181,6 +256,13 @@ function renderAuthFlow() {
     return;
   }
 
+  if (['teacher', 'principal'].includes(currentProfile.requested_role) && !Array.isArray(currentProfile.class_ids) || (Array.isArray(currentProfile.class_ids) && currentProfile.class_ids.length === 0)) {
+    app.innerHTML = roleOnboarding(currentProfile.requested_role);
+    applyBranding();
+    bindAuthEvents();
+    return;
+  }
+
   render();
 }
 
@@ -210,7 +292,7 @@ function bindAuthEvents() {
       showToast('One account can only have one role at a time.');
       return;
     }
-    currentProfile = { ...(currentProfile || {}), requested_role: role, id: currentProfile?.id || currentUser?.uid || 'guest' };
+    currentProfile = { ...(currentProfile || {}), requested_role: role, id: currentProfile?.id || currentUser?.uid || 'guest', class_ids: role === 'teacher' || role === 'principal' ? [] : currentProfile?.class_ids || [] };
     persistActiveProfile(currentProfile);
     if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile));
     renderAuthFlow();
@@ -224,14 +306,53 @@ function bindAuthEvents() {
     renderAuthFlow();
     if (currentProfile.id !== 'onboarding-preview') saveOnboarding({ id: currentProfile.id, requested_role: 'student', grade_id: grade }).catch((error) => console.error('Grade preference could not be saved', error));
   }));
+  document.querySelectorAll('[data-class-choice]').forEach((card) => {
+    const choice = card.dataset.classChoice;
+    const selected = Array.isArray(currentProfile?.class_ids) && currentProfile.class_ids.includes(choice);
+    card.classList.toggle('selected', Boolean(selected));
+    card.addEventListener('click', () => {
+      if (choice === 'all' && currentProfile?.requested_role !== 'principal') {
+        showToast('Only principals can choose all classes.');
+        return;
+      }
+
+      const nextClasses = new Set(Array.isArray(currentProfile?.class_ids) ? currentProfile.class_ids : []);
+      if (choice === 'all') {
+        if (nextClasses.has('all')) {
+          nextClasses.delete('all');
+        } else {
+          nextClasses.clear();
+          nextClasses.add('all');
+        }
+      } else {
+        if (nextClasses.has('all')) nextClasses.delete('all');
+        if (nextClasses.has(choice)) nextClasses.delete(choice);
+        else nextClasses.add(choice);
+      }
+
+      currentProfile = { ...(currentProfile || {}), id: currentProfile?.id || currentUser?.uid || 'guest', class_ids: [...nextClasses] };
+      persistActiveProfile(currentProfile);
+      card.classList.toggle('selected', nextClasses.has(choice));
+    });
+  });
   document.querySelector('#finish-onboarding')?.addEventListener('click', async () => {
+    const role = currentProfile?.requested_role;
+    if (['teacher', 'principal'].includes(role) && (!Array.isArray(currentProfile?.class_ids) || currentProfile.class_ids.length === 0)) {
+      showToast('Please select at least one class before continuing.');
+      return;
+    }
+    if (role === 'teacher' && currentProfile?.class_ids?.includes('all')) {
+      showToast('Teachers cannot select all classes. Choose the classes you teach.');
+      return;
+    }
+
     currentProfile = { ...(currentProfile || {}), id: currentProfile?.id || currentUser?.uid || 'guest', onboarding_complete: true };
     persistActiveProfile(currentProfile);
     if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile));
     renderAuthFlow();
-    if (currentProfile.id !== 'onboarding-preview') saveOnboarding({ id: currentProfile.id, requested_role: currentProfile.requested_role }).catch((error) => console.error('Role request could not be saved', error));
+    if (currentProfile.id !== 'onboarding-preview') saveOnboarding({ id: currentProfile.id, requested_role: currentProfile.requested_role, class_ids: currentProfile.class_ids || [] }).catch((error) => console.error('Role request could not be saved', error));
   });
-  document.querySelector('#back-to-roles')?.addEventListener('click', () => { currentProfile = { ...(currentProfile || {}), id: currentProfile?.id || currentUser?.uid || 'guest', requested_role: null, grade_id: null }; if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile)); persistActiveProfile(currentProfile); renderAuthFlow(); });
+  document.querySelector('#back-to-roles')?.addEventListener('click', () => { currentProfile = { ...(currentProfile || {}), id: currentProfile?.id || currentUser?.uid || 'guest', requested_role: null, grade_id: null, class_ids: [] }; if (currentProfile.id === 'onboarding-preview') sessionStorage.setItem('opta-preview-profile', JSON.stringify(currentProfile)); persistActiveProfile(currentProfile); renderAuthFlow(); });
 }
 
 function navLink(href, label, symbol, active = false) { return `<a class="side-link ${active ? 'active' : ''}" href="${href}">${icon(symbol)}${label}</a>`; }
@@ -317,7 +438,8 @@ function bindLessonHistoryEvents() {
     liveForm.addEventListener('submit', (event) => {
       event.preventDefault();
       const title = document.querySelector('#live-class-title')?.value?.trim();
-      const grade = Number(document.querySelector('#live-class-grade')?.value || 7);
+      const classValue = document.querySelector('#live-class-class')?.value || '';
+      const grade = classValue && classValue !== 'all' ? Number(classValue) : Number(document.querySelector('#live-class-grade')?.value || 7);
       const subject = document.querySelector('#live-class-subject')?.value || 'math';
       const time = document.querySelector('#live-class-time')?.value?.trim() || 'Today · 3:00 PM';
       const students = Number(document.querySelector('#live-class-students')?.value || 18);
@@ -330,7 +452,8 @@ function bindLessonHistoryEvents() {
         time,
         students,
         status: 'Live',
-        teacherId: currentUser?.id || currentUser?.uid || 'default-teacher'
+        teacherId: currentUser?.id || currentUser?.uid || 'default-teacher',
+        classId: String(classValue || grade)
       };
       const existing = getLiveClasses();
       const updated = [classEntry, ...existing.filter((item) => item.id !== classEntry.id)];
@@ -338,6 +461,71 @@ function bindLessonHistoryEvents() {
       showToast('Live class scheduled for your students.');
       liveForm.reset();
       document.querySelector('#live-class-form')?.style.setProperty('display', 'none');
+      render();
+    });
+  }
+
+  const assessmentForm = document.querySelector('#create-assessment-form');
+  if (assessmentForm && !assessmentForm.dataset.bound) {
+    assessmentForm.dataset.bound = 'true';
+    const questionList = document.querySelector('#assessment-question-list');
+    const addQuestionButton = document.querySelector('#add-assessment-question');
+    const ensureQuestionBlocks = () => {
+      if (!questionList) return;
+      if (!questionList.children.length) {
+        questionList.insertAdjacentHTML('beforeend', buildAssessmentQuestionBlock(0));
+      }
+    };
+    ensureQuestionBlocks();
+
+    addQuestionButton?.addEventListener('click', () => {
+      if (!questionList) return;
+      const nextIndex = questionList.children.length;
+      questionList.insertAdjacentHTML('beforeend', buildAssessmentQuestionBlock(nextIndex));
+    });
+
+    assessmentForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const title = document.querySelector('#assessment-title')?.value?.trim() || 'New class test';
+      const classId = document.querySelector('#assessment-class')?.value || '7';
+      const subject = document.querySelector('#assessment-subject')?.value || 'math';
+      const due = document.querySelector('#assessment-due')?.value?.trim() || 'Soon';
+      const blocks = [...document.querySelectorAll('.assessment-question')];
+
+      const questions = blocks.map((block) => {
+        const prompt = block.querySelector('[name="assessment-question"]')?.value?.trim() || '';
+        const options = ['A', 'B', 'C', 'D'].map((label) => ({
+          label,
+          value: block.querySelector(`[name="assessment-option-${label.toLowerCase()}"]`)?.value?.trim() || ''
+        }));
+        const correct = block.querySelector('[name="assessment-correct"]')?.value || 'A';
+
+        return { prompt, options, correctAnswer: correct };
+      }).filter((question) => question.prompt && question.options.every((option) => option.value));
+
+      if (!questions.length) {
+        showToast('Add at least one valid question before saving the assessment.');
+        return;
+      }
+
+      const assessment = {
+        id: `assessment-${Date.now()}`,
+        title,
+        classId: String(classId),
+        subject,
+        due,
+        status: 'Ready',
+        questions: questions.length,
+        questionBank: questions
+      };
+
+      const existing = getTeacherAssessments();
+      const updated = [assessment, ...existing.filter((item) => item.id !== assessment.id)];
+      localStorage.setItem('learn-fola-assessments', JSON.stringify(updated));
+      showToast('Assessment created for this class.');
+      assessmentForm.reset();
+      if (questionList) questionList.innerHTML = buildAssessmentQuestionBlock(0);
+      document.querySelector('#assessment-form')?.style.setProperty('display', 'none');
       render();
     });
   }
@@ -434,6 +622,38 @@ function home() {
   <section class="section"><div class="section-head"><div><div class="eyebrow">Explore your curiosity</div><h2>Browse by subject</h2></div></div><div class="content-grid subject-grid">${subjects.slice(0, 6).map((subject) => `<a class="subject-card reveal" href="subjects.html?subject=${subject.id}"><div class="subject-icon color-${subject.color}">${subject.icon}</div><h3>${subject.name}</h3><p>${subject.description}</p></a>`).join('')}</div></section></main><footer class="footer"><span><strong>Learn With Fola</strong> · Educate · Inspire · Empower.</span><span>Built for students, teachers and what comes next.</span></footer>`;
 }
 
+function examPage(examId) {
+  const assessment = getTeacherAssessments().find((item) => item.id === examId);
+  if (!assessment) {
+    return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">Assessment</div><h1>Test not found</h1><p>This assessment is no longer available.</p></div><a class="btn btn-primary" href="dashboard.html">Back to dashboard →</a></div></div>`, 'Assessment');
+  }
+
+  const questions = Array.isArray(assessment.questionBank) && assessment.questionBank.length ? assessment.questionBank : Array.from({ length: Math.max(1, Number(assessment.questions || 1)) }, (_, index) => ({
+    prompt: `Sample question ${index + 1}`,
+    options: [
+      { label: 'A', value: 'Option A' },
+      { label: 'B', value: 'Option B' },
+      { label: 'C', value: 'Option C' },
+      { label: 'D', value: 'Option D' }
+    ],
+    correctAnswer: 'A'
+  }));
+
+  const questionMarkup = questions.map((question, index) => `
+    <div class="exam-question">
+      <h3>Question ${index + 1}: ${escapeHtml(question.prompt)}</h3>
+      ${question.options.map((option) => `
+        <label class="exam-option">
+          <input type="radio" name="question-${index}" value="${option.label}" required />
+          <span>${option.label}. ${escapeHtml(option.value)}</span>
+        </label>
+      `).join('')}
+    </div>
+  `).join('');
+
+  return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">Assessment</div><h1>${escapeHtml(assessment.title)}</h1><p>Grade ${assessment.classId} · ${assessment.subject} · ${assessment.due}</p></div><a class="btn btn-ghost" href="dashboard.html">Exit test</a></div><form id="assessment-attempt-form" data-assessment-id="${assessment.id}"><div class="exam-wrapper">${questionMarkup}</div><div class="form-actions" style="margin-top:20px"><button class="btn btn-primary" type="submit">Submit test</button></div></form></div>`, assessment.title);
+}
+
 function dashboard() {
   const studentData = getStudentDashboardData();
   const progressRows = studentData.progress.map((item) => `
@@ -467,8 +687,28 @@ function dashboard() {
       <span class="delta">${item.delta}</span>
     </div>
   `).join('');
+  const assessmentRows = getStudentAssessments().slice(0, 3).map((assessment) => `
+    <div class="activity">
+      <div class="activity-dot">✓</div>
+      <div style="flex:1">
+        <p>${assessment.title}</p>
+        <small>${assessment.subject} · Due ${assessment.due}</small>
+      </div>
+      <a class="btn btn-ghost btn-small" href="dashboard.html?exam=${assessment.id}">Start</a>
+    </div>
+  `).join('') || '<div class="empty-state">No assessments for your class yet.</div>';
+  const resultRows = getAssessmentResults().slice(0, 4).map((result) => `
+    <div class="activity">
+      <div class="activity-dot">◎</div>
+      <div style="flex:1">
+        <p>${escapeHtml(result.title)}</p>
+        <small>${result.percent}% · ${result.score}/${result.total} correct</small>
+      </div>
+      <a class="btn btn-ghost btn-small" href="dashboard.html?exam=${result.assessmentId}">Review</a>
+    </div>
+  `).join('') || '<div class="empty-state">No scores yet. Your latest attempts will appear here.</div>';
 
-  return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">${studentData.dateLabel}</div><h1>Welcome back, ${escapeHtml(studentData.name)}.</h1><p>Pick up where you left off and keep your curiosity moving.</p></div><a class="btn btn-primary" href="grades.html">Find a lesson →</a></div><div class="metrics">${metricCards}</div><div class="dashboard-grid"><section class="panel" id="progress"><div class="panel-heading"><h2>Your progress</h2><span>Across your subjects</span></div>${progressRows}</section><section class="panel"><div class="panel-heading"><h2>Recently watched</h2><span>See all →</span></div>${recentRows}</section></div><div class="panel" style="margin-top:18px"><div class="panel-heading"><h2>Live classes for your grade</h2><span>Join now</span></div>${liveClassRows}</div></div>`, 'Dashboard');
+  return shell(`<div class="page"><div class="page-heading"><div><div class="kicker">${studentData.dateLabel}</div><h1>Welcome back, ${escapeHtml(studentData.name)}.</h1><p>Pick up where you left off and keep your curiosity moving.</p></div><a class="btn btn-primary" href="grades.html">Find a lesson →</a></div><div class="metrics">${metricCards}</div><div class="dashboard-grid"><section class="panel" id="progress"><div class="panel-heading"><h2>Your progress</h2><span>Across your subjects</span></div>${progressRows}</section><section class="panel"><div class="panel-heading"><h2>Recently watched</h2><span>See all →</span></div>${recentRows}</section></div><div class="panel" style="margin-top:18px"><div class="panel-heading"><h2>Live classes for your grade</h2><span>Join now</span></div>${liveClassRows}</div><div class="panel" style="margin-top:18px"><div class="panel-heading"><h2>Available assessments</h2><span>Class tests</span></div>${assessmentRows}</div><div class="panel" style="margin-top:18px"><div class="panel-heading"><h2>Results history</h2><span>Latest scores</span></div>${resultRows}</div></div>`, 'Dashboard');
 }
 
 function gradesPage() {
@@ -488,6 +728,23 @@ function lessonPage() { const lesson = getLesson(params.get('id')); return shell
 function teacherPage() {
   const teacherData = academyRoleData.teacher || academyRoleData.student;
   const teacherRosters = pairLiveClassesForRole('teacher');
+  const teacherClassOptions = getTeacherClassOptions().filter((value) => value !== 'all');
+  const assessmentRows = getTeacherAssessments().filter((assessment) => {
+    if (teacherClassOptions.length === 0) return true;
+    if (teacherClassOptions.includes('all')) return true;
+    return teacherClassOptions.includes(String(assessment.classId));
+  }).slice(0, 4).map((assessment) => {
+    const totalQuestions = Array.isArray(assessment.questionBank) ? assessment.questionBank.length : Number(assessment.questions || 0);
+    return `
+      <div class="activity">
+        <div class="activity-dot">✓</div>
+        <div>
+          <p>${assessment.title}</p>
+          <small>Grade ${assessment.classId} · ${assessment.subject} · ${assessment.due} · ${totalQuestions} questions</small>
+        </div>
+      </div>
+    `;
+  }).join('') || '<div class="empty-state">No assessments created for your class yet.</div>';
   const liveClassRows = teacherRosters.map((classItem) => `
     <div class="activity">
       <div class="activity-dot">◎</div>
@@ -496,7 +753,7 @@ function teacherPage() {
         <small>${classItem.time} · ${classItem.students} students · ${classItem.status}</small>
       </div>
     </div>
-  `).join('');
+  `).join('') || '<div class="empty-state">No live classes yet. Start one for your class.</div>';
   const supportRows = (teacherData.support || []).map((student) => `
     <div class="activity">
       <div class="activity-dot">${student.name.split(' ')[0][0]}</div>
@@ -515,6 +772,20 @@ function teacherPage() {
       </div>
     </div>
   `).join('');
+  const resultSummaryRows = getAssessmentResults().filter((result) => {
+    const matchingAssessment = getTeacherAssessments().find((assessment) => assessment.id === result.assessmentId);
+    if (!matchingAssessment) return false;
+    if (teacherClassOptions.includes('all')) return true;
+    return teacherClassOptions.includes(String(matchingAssessment.classId));
+  }).slice(0, 4).map((result) => `
+    <div class="activity">
+      <div class="activity-dot">◎</div>
+      <div>
+        <p>${escapeHtml(result.title)}</p>
+        <small>${result.percent}% scored · ${result.score}/${result.total} correct</small>
+      </div>
+    </div>
+  `).join('') || '<div class="empty-state">No scores yet for your classes.</div>';
   const metricCards = (teacherData.metrics || []).map((item, index) => `
     <div class="metric reveal" style="animation-delay:${index * 90}ms">
       <span class="metric-label">${item.label}</span>
@@ -537,6 +808,7 @@ function teacherPage() {
       </div>
     </article>
   `).join('');
+  const classOptionsMarkup = teacherClassOptions.length ? teacherClassOptions.map((gradeId) => `<option value="${gradeId}">${gradeId === 'all' ? 'All classes' : `Grade ${gradeId}`}</option>`).join('') : '<option value="7">Grade 7</option>';
 
   return shell(`<div class="page">
     <div class="page-heading">
@@ -547,6 +819,7 @@ function teacherPage() {
       </div>
       <div style="display:flex; gap:10px; flex-wrap:wrap">
         <button class="btn btn-primary" id="new-live-class">＋ Start live class</button>
+        <button class="btn btn-ghost" id="new-assessment">＋ Create test</button>
         <button class="btn btn-ghost" id="new-lesson">＋ Create lesson</button>
       </div>
     </div>
@@ -565,17 +838,45 @@ function teacherPage() {
       <div class="panel-heading"><h2>Upcoming classroom work</h2><span>Live plan</span></div>
       ${assignmentRows}
     </div>
+    <div class="panel" style="margin-top:18px">
+      <div class="panel-heading"><h2>Class assessments</h2><span>Tests and quizzes</span></div>
+      ${assessmentRows}
+    </div>
+    <div class="panel" style="margin-top:18px">
+      <div class="panel-heading"><h2>Results overview</h2><span>Class score history</span></div>
+      ${resultSummaryRows}
+    </div>
     <div class="panel" id="live-class-form" style="display:none;margin-top:18px;margin-bottom:20px">
       <div class="panel-heading"><h2>Create a live class</h2><span>Start classroom time in one click</span></div>
       <form class="form-grid" id="create-live-class-form">
         <div class="form-group"><label for="live-class-title">Class title</label><input class="field" id="live-class-title" placeholder="Grade 7 Mathematics Clinic" required /></div>
-        <div class="form-group"><label for="live-class-grade">Grade</label><select class="select-field" id="live-class-grade" required>${allGrades.map((grade) => `<option value="${grade.id}">${grade.label}</option>`).join('')}</select></div>
+        <div class="form-group"><label for="live-class-class">Class</label><select class="select-field" id="live-class-class" required>${classOptionsMarkup}</select></div>
         <div class="form-group"><label for="live-class-subject">Subject</label><select class="select-field" id="live-class-subject" required>${subjects.map((subject) => `<option value="${subject.id}">${subject.name}</option>`).join('')}</select></div>
         <div class="form-group"><label for="live-class-time">Schedule</label><input class="field" id="live-class-time" placeholder="Today · 3:00 PM" required /></div>
         <div class="form-group"><label for="live-class-students">Students</label><input class="field" id="live-class-students" type="number" min="1" value="18" /></div>
         <div class="form-actions" style="grid-column:1 / -1; display:flex; gap:10px; flex-wrap:wrap">
           <button class="btn btn-primary" type="submit">Start class</button>
           <button class="btn btn-ghost" type="button" data-close-live-class>Cancel</button>
+        </div>
+      </form>
+    </div>
+    <div class="panel" id="assessment-form" style="display:none;margin-top:18px;margin-bottom:20px">
+      <div class="panel-heading"><h2>Create a test</h2><span>Make an assessment for your class</span></div>
+      <form class="form-grid" id="create-assessment-form">
+        <div class="form-group"><label for="assessment-title">Assessment title</label><input class="field" id="assessment-title" placeholder="Mid-term revision quiz" required /></div>
+        <div class="form-group"><label for="assessment-class">Class</label><select class="select-field" id="assessment-class" required>${classOptionsMarkup}</select></div>
+        <div class="form-group"><label for="assessment-subject">Subject</label><select class="select-field" id="assessment-subject" required>${subjects.map((subject) => `<option value="${subject.id}">${subject.name}</option>`).join('')}</select></div>
+        <div class="form-group"><label for="assessment-due">Due date</label><input class="field" id="assessment-due" placeholder="Tomorrow · 2:00 PM" required /></div>
+        <div class="form-group full" style="margin-bottom:0">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px;">
+            <label style="margin:0;">Questions</label>
+            <button class="btn btn-ghost btn-small" type="button" id="add-assessment-question">＋ Add question</button>
+          </div>
+          <div id="assessment-question-list"></div>
+        </div>
+        <div class="form-actions" style="grid-column:1 / -1; display:flex; gap:10px; flex-wrap:wrap">
+          <button class="btn btn-primary" type="submit">Create assessment</button>
+          <button class="btn btn-ghost" type="button" data-close-assessment>Cancel</button>
         </div>
       </form>
     </div>
@@ -714,10 +1015,17 @@ function render() {
   const role = (currentProfile?.requested_role || currentUser?.requested_role || 'student').toLowerCase();
   if (page === 'home') app.innerHTML = home();
   if (page === 'dashboard') {
-    if (role === 'teacher') app.innerHTML = teacherPage();
-    else if (role === 'parent') app.innerHTML = parentPage();
-    else if (role === 'principal') app.innerHTML = principalPage();
-    else app.innerHTML = dashboard();
+    if (params.get('exam')) {
+      app.innerHTML = examPage(params.get('exam'));
+    } else if (role === 'teacher') {
+      app.innerHTML = teacherPage();
+    } else if (role === 'parent') {
+      app.innerHTML = parentPage();
+    } else if (role === 'principal') {
+      app.innerHTML = principalPage();
+    } else {
+      app.innerHTML = dashboard();
+    }
   }
   if (page === 'grades' && !['teacher', 'principal'].includes(role)) app.innerHTML = gradesPage();
   if (page === 'grades' && ['teacher', 'principal'].includes(role)) app.innerHTML = (role === 'teacher' ? teacherPage() : principalPage());
@@ -881,8 +1189,50 @@ function bindEvents() {
   document.querySelector('#mobile-menu')?.addEventListener('click', () => document.querySelector('#sidebar')?.classList.toggle('open'));
   document.querySelector('#save-lesson')?.addEventListener('click', (event) => { event.currentTarget.textContent = '✓ Saved to your lessons'; event.currentTarget.classList.add('btn-primary'); showToast('Lesson saved to your learning space.'); });
   document.querySelector('#new-lesson')?.addEventListener('click', () => { const form = document.querySelector('#lesson-form'); form.style.display = form.style.display === 'none' ? 'block' : 'none'; form.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  document.querySelector('#new-assessment')?.addEventListener('click', () => { const form = document.querySelector('#assessment-form'); if (form) { form.style.display = form.style.display === 'none' ? 'block' : 'none'; form.scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
   document.querySelector('[data-close-live-class]')?.addEventListener('click', () => { const form = document.querySelector('#live-class-form'); if (form) form.style.display = 'none'; });
+  document.querySelector('[data-close-assessment]')?.addEventListener('click', () => { const form = document.querySelector('#assessment-form'); if (form) form.style.display = 'none'; });
   document.querySelector('#new-live-class')?.addEventListener('click', () => { const form = document.querySelector('#live-class-form'); if (form) { form.style.display = form.style.display === 'none' ? 'block' : 'none'; form.scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
+  document.querySelector('#assessment-attempt-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const assessmentId = form.dataset.assessmentId;
+    const assessment = getTeacherAssessments().find((item) => item.id === assessmentId);
+    if (!assessment) return;
+
+    const totalQuestions = Array.isArray(assessment.questionBank) && assessment.questionBank.length ? assessment.questionBank.length : Math.max(1, Number(assessment.questions || 1));
+    let correct = 0;
+
+    for (let index = 0; index < totalQuestions; index += 1) {
+      const selected = form.querySelector(`input[name="question-${index}"]:checked`);
+      const question = (assessment.questionBank || [])[index] || { correctAnswer: 'A' };
+      if (selected && selected.value === question.correctAnswer) correct += 1;
+    }
+
+    const percent = Math.round((correct / totalQuestions) * 100);
+    const results = getAssessmentResults();
+    results.push({ assessmentId, title: assessment.title, score: correct, total: totalQuestions, percent, submittedAt: new Date().toISOString() });
+    localStorage.setItem('learn-fola-assessment-results', JSON.stringify(results));
+
+    const resultMarkup = `
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-heading"><h2>Assessment submitted</h2><span>Results</span></div>
+        <div class="activity">
+          <div class="activity-dot">✓</div>
+          <div>
+            <p>${escapeHtml(assessment.title)}</p>
+            <small>You scored ${correct}/${totalQuestions} (${percent}%).</small>
+          </div>
+        </div>
+        <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap">
+          <a class="btn btn-primary" href="dashboard.html">Back to dashboard</a>
+          <button class="btn btn-ghost" type="button" onclick="window.location.href='dashboard.html'">Try again later</button>
+        </div>
+      </div>
+    `;
+    form.replaceWith(resultMarkup);
+    showToast(`Assessment complete: ${percent}%`);
+  });
   document.querySelector('[data-save="draft"]')?.addEventListener('click', () => { localStorage.setItem('opta-draft', 'saved'); showToast('Draft saved locally.'); });
   document.querySelector('#grade-search')?.addEventListener('input', (event) => { document.querySelectorAll('#grade-grid .grade-card').forEach((card) => { card.style.display = card.textContent.toLowerCase().includes(event.target.value.toLowerCase()) ? '' : 'none'; }); });
   document.querySelector('#difficulty-filter')?.addEventListener('change', (event) => { document.querySelectorAll('#lesson-results .lesson-card').forEach((card) => { card.style.display = event.target.value === 'all' || card.textContent.includes(event.target.value) ? '' : 'none'; }); });
