@@ -478,6 +478,7 @@ function bindLessonHistoryEvents() {
       const subject = document.querySelector('#live-class-subject')?.value || 'math';
       const time = document.querySelector('#live-class-time')?.value?.trim() || 'Today · 3:00 PM';
       const students = Number(document.querySelector('#live-class-students')?.value || 18);
+      const meetUrl = openGoogleMeet();
       const classEntry = {
         id: `live-${Date.now()}`,
         title: title || `Grade ${grade} ${getSubject(subject).name}`,
@@ -488,12 +489,13 @@ function bindLessonHistoryEvents() {
         students,
         status: 'Live',
         teacherId: currentUser?.id || currentUser?.uid || 'default-teacher',
-        classId: String(classValue || grade)
+        classId: String(classValue || grade),
+        meetingLink: meetUrl
       };
       const existing = getLiveClasses();
       const updated = [classEntry, ...existing.filter((item) => item.id !== classEntry.id)];
       localStorage.setItem('learn-fola-live-classes', JSON.stringify(updated));
-      showToast('Live class scheduled for your students.');
+      showToast('Google Meet opened and the class is now live.');
       liveForm.reset();
       document.querySelector('#live-class-form')?.style.setProperty('display', 'none');
       render();
@@ -1173,6 +1175,14 @@ async function bootstrap() {
 }
 
 function showToast(message) { const toast = document.querySelector('#toast'); if (!toast) return; toast.textContent = message; toast.classList.add('show'); window.setTimeout(() => toast.classList.remove('show'), 2400); }
+function openGoogleMeet() {
+  const meetUrl = 'https://meet.google.com/new';
+  const newWindow = window.open(meetUrl, '_blank', 'noopener,noreferrer');
+  if (!newWindow) {
+    window.location.href = meetUrl;
+  }
+  return meetUrl;
+}
 function youtubeId(url) { const match = String(url).match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/); return match ? match[1] : null; }
 function bindEvents() {
   const openAuth = () => {
